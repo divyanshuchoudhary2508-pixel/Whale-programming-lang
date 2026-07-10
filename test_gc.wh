@@ -1,0 +1,17 @@
+struct Node {
+    value: int
+    next: list<int>
+}
+
+fn main() {
+    print("Starting GC stress test...");
+    
+    let mut i = 0;
+    while i < 100000 {
+        // This will allocate a new struct AND a new array on the heap
+        let n = Node { value: i, next: [i, i+1, i+2] };
+        i = i + 1;
+    }
+    
+    print("GC stress test completed successfully!");
+}

@@ -1,0 +1,70 @@
+{
+  "name": "whale-lang",
+  "displayName": "Whale Language",
+  "description": "Language support for the Whale programming language — syntax highlighting, type checking, hover, and completion.",
+  "version": "0.1.0",
+  "publisher": "whale-lang",
+  "engines": { "vscode": "^1.75.0" },
+  "categories": ["Programming Languages"],
+  "keywords": ["whale", "language", "lsp"],
+  "activationEvents": ["onLanguage:whale"],
+  "main": "./extension.js",
+  "contributes": {
+    "languages": [
+      {
+        "id": "whale",
+        "aliases": ["Whale", "wh"],
+        "extensions": [".wh"],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "whale",
+        "scopeName": "source.wh",
+        "path": "./syntaxes/whale.tmLanguage.json"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "whale",
+        "label": "Whale Debugger",
+        "program": "wh-dap",
+        "runtime": "node",
+        "languages": ["whale"],
+        "configurationAttributes": {
+          "launch": {
+            "required": ["program"],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Absolute path to the whale file to debug.",
+                "default": "${file}"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "description": "Automatically stop after launch.",
+                "default": true
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "whale",
+            "request": "launch",
+            "name": "Debug Whale File",
+            "program": "${file}",
+            "stopOnEntry": true
+          }
+        ]
+      }
+    ]
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.75.0"
+  }
+}

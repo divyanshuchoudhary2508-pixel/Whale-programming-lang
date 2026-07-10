@@ -1,0 +1,15 @@
+import "math";
+
+fn main() {
+    print("Testing the math module!");
+    
+    let sum = math.add(10, 20);
+    print("math.add(10, 20) = ", sum);
+    
+    let a = math.area(5);
+    print("math.area(5) = ", a);
+    
+    print("math.pi() = ", math.pi());
+}
+
+main();

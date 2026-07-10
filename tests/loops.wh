@@ -1,0 +1,40 @@
+// loops.wh — tests while and for loops.
+// Expected output:
+//   5
+//   0 1 2 3 4
+//   sum=15
+//   [1, 4, 9, 16, 25]
+
+// While loop
+let mut i = 0;
+while i < 5 {
+    i = i + 1;
+}
+print(i);
+
+// For loop with index counting
+let mut out = "";
+let mut j = 0;
+while j < 5 {
+    if j > 0 {
+        out = out + " ";
+    }
+    out = out + to_string(j);
+    j = j + 1;
+}
+print(out);
+
+// For-in loop: sum
+let nums = [1, 2, 3, 4, 5];
+let mut sum = 0;
+for n in nums {
+    sum = sum + n;
+}
+print("sum=" + to_string(sum));
+
+// For-in with map-like pattern
+let mut squares = [];
+for n in nums {
+    squares = squares + [n * n];
+}
+print(to_string(squares));

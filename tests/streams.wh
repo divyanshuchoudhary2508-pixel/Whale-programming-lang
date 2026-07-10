@@ -1,0 +1,54 @@
+// streams.wh — exercises the pipe operator and lazy stream operations.
+// Expected output:
+//   [20, 40, 60, 80]
+//   3
+//   4
+//   5
+//   [1, 2, 3]
+//   [3, 4, 5]
+//   15
+//   [60, 80, 100]
+//   0
+
+// Basic pipeline: filter, map, collect.
+let evens_doubled = [1, 2, 3, 4, 5, 6, 7, 8]
+    |> filter(n => n % 2 == 0)
+    |> map(n => n * 10)
+    |> collect;
+print(to_string(evens_doubled));   // [20, 40, 60, 80]
+
+// for_each: run side effects over a stream.
+[1, 2, 3, 4, 5]
+    |> filter(n => n > 2)
+    |> for_each(n => print(n));    // 3, 4, 5
+
+// take: limit stream to first N elements.
+let first_three = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]
+    |> take(3)
+    |> collect;
+print(to_string(first_three));     // [1, 2, 3]
+
+// skip: drop first N elements.
+let skip_two = [1, 2, 3, 4, 5]
+    |> skip(2)
+    |> collect;
+print(to_string(skip_two));        // [3, 4, 5]
+
+// fold: reduce to a single value.
+let sum = [1, 2, 3, 4, 5]
+    |> fold(0, (acc, n) => acc + n);
+print(sum);                         // 15
+
+// Using a variable that holds a stream.
+let raw = stream([10, 20, 30, 40, 50]);
+let result = raw
+    |> filter(n => n >= 30)
+    |> map(n => n * 2)
+    |> collect;
+print(to_string(result));           // [60, 80, 100]
+
+// Empty stream.
+let empty = []
+    |> filter(n => true)
+    |> collect;
+print(len(empty));                  // 0

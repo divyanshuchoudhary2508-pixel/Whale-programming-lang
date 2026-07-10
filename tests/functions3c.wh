@@ -1,0 +1,15 @@
+let nums = [1, 2, 3, 4, 5, 6];
+
+let evens = nums
+  |> stream()
+  |> filter(n => n % 2 == 0)
+  |> map(n => n * 10)
+  |> collect;
+
+print(evens);
+
+nums
+  |> stream()
+  |> filter(n => n > 3)
+  |> map(n => n * 2)
+  |> for_each(n => print(n));

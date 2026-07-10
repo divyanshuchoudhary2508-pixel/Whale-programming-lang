@@ -1,0 +1,19 @@
+fn listen(port: int) -> int {
+    return net_listen(port);
+}
+
+fn accept(fd: int) -> int {
+    return net_accept(fd);
+}
+
+fn recv(fd: int) -> string {
+    return net_recv(fd);
+}
+
+fn send(fd: int, data: string) {
+    net_send(fd, data);
+}
+
+fn close(fd: int) {
+    net_close(fd);
+}

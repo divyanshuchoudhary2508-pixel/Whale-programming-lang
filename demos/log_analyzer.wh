@@ -1,0 +1,52 @@
+// log_analyzer.wh — reads a log file and produces a summary.
+// Run log_generator.wh first to create the log file.
+// Usage: wh run demos/log_analyzer.wh
+
+let path = "whale_demo.log";
+
+// Read file and split into lines
+let text = read_file(path);
+let all_lines = lines(text);
+
+print("=== Log Analysis Report ===");
+print("Total entries: " + to_string(len(all_lines)));
+
+// Count by severity level
+fn count_with_level(entries, level: string) -> int {
+    let search = " " + level + " ";
+    return entries
+        |> stream()
+        |> filter(line => contains(line, search))
+        |> fold(0, (acc, line) => acc + 1);
+}
+
+let n_info  = count_with_level(all_lines, "INFO");
+let n_debug = count_with_level(all_lines, "DEBUG");
+let n_warn  = count_with_level(all_lines, "WARN");
+let n_error = count_with_level(all_lines, "ERROR");
+
+print("");
+print("By level:");
+print("  INFO:  " + to_string(n_info));
+print("  DEBUG: " + to_string(n_debug));
+print("  WARN:  " + to_string(n_warn));
+print("  ERROR: " + to_string(n_error));
+
+// Show error entries using the pipe operator
+print("");
+print("=== ERROR entries ===");
+all_lines
+    |> stream()
+    |> filter(line => contains(line, " ERROR "))
+    |> for_each(line => print("  " + line));
+
+// Show warn entries
+print("");
+print("=== WARN entries ===");
+all_lines
+    |> stream()
+    |> filter(line => contains(line, " WARN "))
+    |> for_each(line => print("  " + line));
+
+print("");
+print("Analysis complete.");

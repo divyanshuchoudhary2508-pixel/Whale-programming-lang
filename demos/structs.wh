@@ -1,0 +1,28 @@
+struct Point {
+    x: int,
+    y: int
+}
+
+struct Rect {
+    top_left: Point,
+    bottom_right: Point
+}
+
+fn area(r: Rect) -> int {
+    let width = r.bottom_right.x - r.top_left.x;
+    let height = r.bottom_right.y - r.top_left.y;
+    return width * height;
+}
+
+let p1 = Point { x: 2, y: 3 };
+let p2 = Point { x: 10, y: 8 };
+let r = Rect { top_left: p1, bottom_right: p2 };
+
+print("Point 1:");
+print(p1);
+
+print("Point 2:");
+print(p2);
+
+print("Rect Area:");
+print(area(r));

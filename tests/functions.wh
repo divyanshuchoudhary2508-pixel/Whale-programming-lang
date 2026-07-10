@@ -1,0 +1,40 @@
+// functions.wh — tests user-defined functions, closures, recursion, lambdas.
+// Expected output:
+//   7
+//   120
+//   15
+//   14
+//   <fn add>
+//   55
+
+// Basic function
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+print(add(3, 4));
+
+// Recursive function: factorial
+fn fact(n: int) -> int {
+    if n <= 1 { return 1; }
+    return n * fact(n - 1);
+}
+print(fact(5));
+
+// Closure: function captures outer variable
+let factor = 3;
+let mult = fn(x: int) -> int { return x * factor; };
+print(mult(5));
+
+// Lambda: arrow form
+let double = x => x * 2;
+print(double(7));
+
+// Functions are first-class values
+print(type_of(add));
+
+// Fibonacci (tests recursion more deeply)
+fn fib(n: int) -> int {
+    if n <= 1 { return n; }
+    return fib(n - 1) + fib(n - 2);
+}
+print(fib(10));

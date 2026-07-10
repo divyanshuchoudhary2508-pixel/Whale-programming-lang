@@ -1,0 +1,6 @@
+fn main() {
+	let arr = [10, 20, 30] |> map(x => x * 2) |> collect();
+	print(arr[0]);
+	print(arr[1]);
+	print(arr[2]);
+}

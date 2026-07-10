@@ -1,0 +1,10 @@
+fn expensive_math() -> int {
+    print("This runs at COMPILE TIME!");
+    return 10 * 10 * 10;
+}
+
+// Evaluated during type-checking
+let x: int = comptime expensive_math();
+
+// At runtime, this just prints 1000
+print("Runtime value is:", x);

@@ -1,0 +1,9 @@
+let factor = 10;
+let scale = x => x * factor;
+
+print(scale(5));
+
+let makeAdder = a => b => a + b;
+
+let add10 = makeAdder(10);
+print(add10(5));

@@ -1,0 +1,11 @@
+fn new() -> int {
+    return map_new();
+}
+
+fn set(m: int, key: string, value: string) {
+    map_set(m, key, value);
+}
+
+fn get(m: int, key: string) -> string {
+    return map_get(m, key);
+}

@@ -1,0 +1,19 @@
+fn main() {
+    print("Testing string functions:");
+    let text = "Hello Whale";
+    print("Original: ", text);
+    print("Lower: ", to_lower(text));
+    print("Upper: ", to_upper(text));
+    
+    print("Testing math functions:");
+    let num = 0.0 - 42.5;
+    print("Abs: ", abs(num));
+    print("Max: ", max(num, 10.0));
+    
+    print("Testing file IO:");
+    write_file("test.txt", "line1\nline2\nline3");
+    let content = read_file("test.txt");
+    print("File Content: ", content);
+}
+
+main();

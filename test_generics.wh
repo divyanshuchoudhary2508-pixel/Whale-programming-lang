@@ -1,0 +1,17 @@
+enum Result<T, E> {
+    Ok(T),
+    Err(E)
+}
+
+fn identity<T>(x: T) -> T {
+    return x;
+}
+
+let a = identity(5);
+let b = identity("hello");
+
+let success: Result<int, string> = Ok(10);
+let failure: Result<int, string> = Err("error");
+
+print(a);
+print(b);

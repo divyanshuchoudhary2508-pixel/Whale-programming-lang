@@ -1,0 +1,36 @@
+// structs.wh — tests struct declarations, literals, and field access.
+// Expected output:
+//   3
+//   4
+//   5.0
+//   Point { x: 3, y: 4 }
+
+struct Point {
+    x: int,
+    y: int
+}
+
+let p = Point { x: 3, y: 4 };
+print(p.x);    // 3
+print(p.y);    // 4
+
+// Struct in a function
+fn distance_sq(pt: Point) -> int {
+    return pt.x * pt.x + pt.y * pt.y;
+}
+print(distance_sq(p));    // 25
+
+// Struct in a list
+struct Color {
+    r: int,
+    g: int,
+    b: int
+}
+
+let red = Color { r: 255, g: 0, b: 0 };
+let green = Color { r: 0, g: 255, b: 0 };
+let palette = [red, green];
+
+for c in palette {
+    print("r=" + to_string(c.r) + " g=" + to_string(c.g) + " b=" + to_string(c.b));
+}

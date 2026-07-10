@@ -1,0 +1,24 @@
+enum Result {
+    Ok(int),
+    Err(string)
+}
+
+fn divide(a: int, b: int) -> Result {
+    if b == 0 {
+        return Err("division by zero");
+    }
+    return Ok(a / b);
+}
+
+fn test_match(res: Result) {
+    match res {
+        Ok(data) => print(data),
+        Err(msg) => print(msg)
+    };
+}
+
+let res1 = divide(10, 2);
+test_match(res1);
+
+let res2 = divide(10, 0);
+test_match(res2);

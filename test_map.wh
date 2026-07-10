@@ -1,0 +1,14 @@
+import "lib/map" as map;
+
+fn main() {
+    let m = map.new();
+    map.set(m, "hello", "world");
+    map.set(m, "foo", "bar");
+    map.set(m, "lohel", "collision"); // same length, so it collides!
+    
+    print("hello -> ", map.get(m, "hello"));
+    print("foo -> ", map.get(m, "foo"));
+    print("lohel -> ", map.get(m, "lohel"));
+}
+
+main();

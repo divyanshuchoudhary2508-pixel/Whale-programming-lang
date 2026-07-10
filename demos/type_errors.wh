@@ -1,0 +1,13 @@
+fn add(a: int, b: int) -> int {
+	return "hello";
+}
+
+fn main() {
+	let arr = [1, 2, "hello"];
+	
+	let s = [1, 2, 3] |> map(x => x + "string") |> collect();
+	
+	let s2 = [1, 2, 3] |> filter(x => x + 1) |> collect();
+	
+	let s3 = 10 |> stream();
+}

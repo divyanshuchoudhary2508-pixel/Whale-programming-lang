@@ -1,0 +1,31 @@
+fn read(path: string) -> string {
+    return read_file(path);
+}
+
+fn write(path: string, data: string) {
+    write_file(path, data);
+}
+
+fn lines(data: string) -> [string] {
+    return lines(data);
+}
+
+fn split(data: string, sep: string) -> [string] {
+    return split(data, sep);
+}
+
+fn trim(data: string) -> string {
+    return trim(data);
+}
+
+fn replace(data: string, old: string, new: string) -> string {
+    return replace(data, old, new);
+}
+
+fn to_lower(data: string) -> string {
+    return to_lower(data);
+}
+
+fn to_upper(data: string) -> string {
+    return to_upper(data);
+}

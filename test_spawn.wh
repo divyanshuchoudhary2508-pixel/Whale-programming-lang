@@ -1,0 +1,15 @@
+let ch: chan<int> = make_chan();
+
+fn worker(id: int, c: chan<int>) {
+    print("Worker", id, "done");
+    c <- id * 10;
+}
+
+spawn worker(1, ch);
+spawn worker(2, ch);
+
+let r1 = <-ch;
+let r2 = <-ch;
+
+print("Received", r1);
+print("Received", r2);

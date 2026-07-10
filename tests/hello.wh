@@ -1,0 +1,13 @@
+// hello.wh — the classic first program, and a sanity test.
+// Expected output:
+//   hello, whale!
+//   5
+//   8
+
+print("hello, whale!");
+
+let x = 5;
+print(x);
+
+let y = x + 3;
+print(y);

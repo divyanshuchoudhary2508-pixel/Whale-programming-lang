@@ -1,0 +1,38 @@
+import "lib/fs" as fs;
+import "lib/net" as net;
+import "lib/map" as map;
+
+fn main() {
+    print("Testing the Map Module...");
+    let m = map.new();
+    map.set(m, "Whale", "100 Points");
+    print("Whale Score: ", map.get(m, "Whale"));
+
+    print("Testing the Net Module...");
+    // Let's spawn a quick echo server
+    spawn server();
+    
+    // Wait for server to start
+    let conn = net.dial("127.0.0.1", 8080);
+    if conn == 0 - 1 {
+        print("Failed to connect to local server.");
+    } else {
+        print("Connected to local server!");
+        net.send(conn, "Hello Server!");
+        let response = net.recv(conn);
+        print("Echoed: ", response);
+        net.close(conn);
+    }
+}
+
+fn server() {
+    let s = net.listen(8080);
+    if s != 0 - 1 {
+        let conn = net.accept(s);
+        let req = net.recv(conn);
+        net.send(conn, req); // echo
+        net.close(conn);
+    }
+}
+
+main();

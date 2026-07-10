@@ -1,0 +1,6 @@
+import "test_math";
+
+fn main() -> int {
+    print(test_math.abs(-42));
+    return 0;
+}

@@ -1,0 +1,20 @@
+2025-01-15 10:00:01 INFO server started on port 8080
+2025-01-15 10:00:05 DEBUG loaded config from /etc/whale.conf
+2025-01-15 10:01:12 INFO user logged in: alice
+2025-01-15 10:02:33 WARN slow query: 1.2s for SELECT * FROM users
+2025-01-15 10:03:01 ERROR database connection failed: timeout
+2025-01-15 10:03:02 INFO retrying database connection
+2025-01-15 10:03:05 INFO database connection restored
+2025-01-15 10:04:18 DEBUG cache miss for key: user:42
+2025-01-15 10:05:22 WARN memory usage at 85%
+2025-01-15 10:06:44 ERROR unhandled exception in request handler: NullPointer
+2025-01-15 10:07:11 INFO user logged out: alice
+2025-01-15 10:08:00 DEBUG garbage collection took 45ms
+2025-01-15 10:09:30 WARN deprecated API used: /v1/users
+2025-01-15 10:10:15 INFO user logged in: bob
+2025-01-15 10:11:45 ERROR failed to write to disk: no space
+2025-01-15 10:12:00 INFO disk space freed by cleanup job
+2025-01-15 10:13:20 DEBUG received request: GET /api/users
+2025-01-15 10:14:55 WARN rate limit exceeded for client: 192.168.1.10
+2025-01-15 10:15:30 INFO user logged in: carol
+2025-01-15 10:16:00 ERROR redis connection lost

@@ -1,0 +1,49 @@
+// control_flow.wh — tests if/else, else-if, logical operators.
+// Expected output:
+//   big
+//   medium
+//   B
+//   short-circuit true
+//   short-circuit false
+
+let x = 10;
+if x > 5 {
+    print("big");
+} else {
+    print("small");
+}
+
+let y = 5;
+if y > 8 {
+    print("large");
+} else if y > 3 {
+    print("medium");
+} else {
+    print("small");
+}
+
+// Else-if chain (grade function)
+fn grade(score: int) -> string {
+    if score >= 90 {
+        return "A";
+    } else if score >= 80 {
+        return "B";
+    } else if score >= 70 {
+        return "C";
+    } else {
+        return "F";
+    }
+}
+print(grade(85));
+
+// Short-circuit evaluation
+let a = true;
+if a || false {
+    print("short-circuit true");
+}
+let b = false;
+if b && true {
+    print("should not print");
+} else {
+    print("short-circuit false");
+}

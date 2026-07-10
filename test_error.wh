@@ -1,0 +1,12 @@
+fn failing_task() -> Result<int> {
+    return error("Could not connect to database");
+}
+
+fn do_work() -> Result<int> {
+    let val = failing_task()?; // Bubbles the error up
+    return val * 2;
+}
+
+let res = do_work();
+print("Program finished with result: ");
+print(res);

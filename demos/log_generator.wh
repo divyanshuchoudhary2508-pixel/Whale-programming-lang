@@ -1,0 +1,44 @@
+// log_generator.wh — generates a fake log file for the analyzer demo.
+// Writes 20 log entries to /tmp/whale_demo.log (or whale_demo.log on Windows).
+
+let path = "whale_demo.log";
+
+fn entry(ts: string, level: string, msg: string) -> string {
+    return ts + " " + level + " " + msg;
+}
+
+let mut log_lines = [];
+log_lines = log_lines + [entry("2025-01-15 10:00:01", "INFO",  "server started on port 8080")];
+log_lines = log_lines + [entry("2025-01-15 10:00:05", "DEBUG", "loaded config from /etc/whale.conf")];
+log_lines = log_lines + [entry("2025-01-15 10:01:12", "INFO",  "user logged in: alice")];
+log_lines = log_lines + [entry("2025-01-15 10:02:33", "WARN",  "slow query: 1.2s for SELECT * FROM users")];
+log_lines = log_lines + [entry("2025-01-15 10:03:01", "ERROR", "database connection failed: timeout")];
+log_lines = log_lines + [entry("2025-01-15 10:03:02", "INFO",  "retrying database connection")];
+log_lines = log_lines + [entry("2025-01-15 10:03:05", "INFO",  "database connection restored")];
+log_lines = log_lines + [entry("2025-01-15 10:04:18", "DEBUG", "cache miss for key: user:42")];
+log_lines = log_lines + [entry("2025-01-15 10:05:22", "WARN",  "memory usage at 85%")];
+log_lines = log_lines + [entry("2025-01-15 10:06:44", "ERROR", "unhandled exception in request handler: NullPointer")];
+log_lines = log_lines + [entry("2025-01-15 10:07:11", "INFO",  "user logged out: alice")];
+log_lines = log_lines + [entry("2025-01-15 10:08:00", "DEBUG", "garbage collection took 45ms")];
+log_lines = log_lines + [entry("2025-01-15 10:09:30", "WARN",  "deprecated API used: /v1/users")];
+log_lines = log_lines + [entry("2025-01-15 10:10:15", "INFO",  "user logged in: bob")];
+log_lines = log_lines + [entry("2025-01-15 10:11:45", "ERROR", "failed to write to disk: no space")];
+log_lines = log_lines + [entry("2025-01-15 10:12:00", "INFO",  "disk space freed by cleanup job")];
+log_lines = log_lines + [entry("2025-01-15 10:13:20", "DEBUG", "received request: GET /api/users")];
+log_lines = log_lines + [entry("2025-01-15 10:14:55", "WARN",  "rate limit exceeded for client: 192.168.1.10")];
+log_lines = log_lines + [entry("2025-01-15 10:15:30", "INFO",  "user logged in: carol")];
+log_lines = log_lines + [entry("2025-01-15 10:16:00", "ERROR", "redis connection lost")];
+
+// Join lines with newlines
+let mut content = "";
+let mut i = 0;
+while i < len(log_lines) {
+    if i > 0 {
+        content = content + "\n";
+    }
+    content = content + log_lines[i];
+    i = i + 1;
+}
+
+write_file(path, content);
+print("Wrote " + to_string(len(log_lines)) + " log entries to " + path);

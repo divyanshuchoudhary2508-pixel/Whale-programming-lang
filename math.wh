@@ -1,0 +1,11 @@
+fn pi() -> int {
+    return 3;
+}
+
+fn add(a: int, b: int) -> int {
+    return a + b;
+}
+
+fn area(r: int) -> int {
+    return pi() * r * r;
+}

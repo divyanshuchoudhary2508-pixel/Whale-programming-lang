@@ -1,0 +1,13 @@
+fn main() {
+    let x = 2 * 3 + 4; // Constant folded to 10
+    let text = "hello " + "world"; // Constant folded to "hello world"
+    
+    print("x is ", x);
+    print("text is ", text);
+
+    return; // Early return
+
+    // This code should be eliminated by DCE
+    print("This should never print!");
+    let y = 100;
+}
