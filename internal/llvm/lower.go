@@ -409,6 +409,18 @@ func (l *lowerer) lowerExpr(e ast.Expr) (Expr, error) {
 			return nil, err
 		}
 		return &ChanRecvExpr{Chan: ch}, nil
+	case *ast.ErrorLit:
+		msg, err := l.lowerExpr(node.Msg)
+		if err != nil {
+			return nil, err
+		}
+		return &ErrorLit{Msg: msg}, nil
+	case *ast.TryExpr:
+		expr, err := l.lowerExpr(node.Expr)
+		if err != nil {
+			return nil, err
+		}
+		return &TryExpr{Expr: expr}, nil
 	default:
 		return nil, fmt.Errorf("LLVM backend unsupported expression: %T", e)
 	}
@@ -458,6 +470,10 @@ func inferLoweredType(val Expr) Type {
 		return TypeInt // fallback
 	case *AllocArray:
 		return Type("[" + string(v.ElementType) + "]")
+	case *TryExpr:
+		return TypeInt // simplified fallback for Ok payload
+	case *ErrorLit:
+		return Type("Result")
 	default:
 		return TypeInt
 	}

@@ -1,12 +1,25 @@
-fn failing_task() -> Result<int> {
-    return error("Could not connect to database");
+// test_error.wh
+
+pub fn might_fail(fail: bool) -> Result<int> {
+    if fail {
+        return error("it failed!");
+    }
+    return 42;
 }
 
-fn do_work() -> Result<int> {
-    let val = failing_task()?; // Bubbles the error up
-    return val * 2;
+pub fn do_something(fail: bool) -> Result<int> {
+    let val = might_fail(fail)?;
+    return val + 10;
 }
 
-let res = do_work();
-print("Program finished with result: ");
-print(res);
+fn main() {
+    let res1 = do_something(false);
+    print("res1 (Success): ");
+    print(res1);
+    
+    let res2 = do_something(true);
+    print("res2 (Failure): ");
+    print(res2);
+}
+
+main();

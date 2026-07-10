@@ -232,7 +232,7 @@ func (*IntLit) exprNode()      {}
 func (*FloatLit) exprNode()    {}
 func (*BoolLit) exprNode()     {}
 func (*StringLit) exprNode()   {}
-func (*Ident) exprNode()       {}
+func (*Ident) exprNode()         {}
 func (*BinaryExpr) exprNode()  {}
 func (*CallExpr) exprNode()    {}
 func (*StructLit) exprNode()   {}
@@ -267,9 +267,19 @@ func (*LenExpr) exprNode()      {}
 func (*AllocArray) exprNode()   {}
 func (*MatchExpr) exprNode()    {}
 func (*ConstructEnumExpr) exprNode() {}
+func (*ErrorLit) exprNode()          {}
+func (*TryExpr) exprNode()           {}
 func (*ChanRecvExpr) exprNode() {}
 
 // ChanRecvExpr: <-chan
 type ChanRecvExpr struct {
 	Chan Expr
+}
+
+type ErrorLit struct {
+	Msg Expr
+}
+
+type TryExpr struct {
+	Expr Expr
 }

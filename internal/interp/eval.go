@@ -706,15 +706,32 @@ func (i *Interpreter) evalExpr(e ast.Expr) Value {
 		return i.evalExpr(e.Expr)
 	case *ast.ErrorLit:
 		msgVal := i.evalExpr(e.Msg)
+		var strMsg string
 		if sv, ok := msgVal.(stringValue); ok {
-			return errorValue{msg: sv.v, trace: nil}
+			strMsg = sv.v
+		} else {
+			strMsg = msgVal.String()
 		}
-		return errorValue{msg: msgVal.String(), trace: nil}
+		// In Whale, error(...) produces an Err variant of a Result enum
+		return enumValue{Variant: "Err", Payload: stringValue{v: strMsg}}
 	case *ast.TryExpr:
 		val := i.evalExpr(e.Expr)
 		if len(i.errs) > 0 {
 			return nullValue{}
 		}
+		
+		if enumVal, ok := val.(enumValue); ok {
+			if enumVal.Variant == "Err" {
+				panic(returnSignal{value: enumVal})
+			} else if enumVal.Variant == "Ok" {
+				if enumVal.Payload != nil {
+					return enumVal.Payload
+				}
+				return nullValue{}
+			}
+		}
+		
+		// Fallback for legacy errorValue
 		if errVal, ok := val.(errorValue); ok {
 			errVal.trace = append(errVal.trace, fmt.Sprintf("line %d, col %d", e.Pos.Line, e.Pos.Col))
 			panic(returnSignal{value: errVal})

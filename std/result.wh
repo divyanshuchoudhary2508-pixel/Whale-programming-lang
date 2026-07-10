@@ -1,0 +1,25 @@
+// std/result.wh
+// Defines the core Result type for error handling.
+
+pub enum Result<T, E> {
+    Ok(T),
+    Err(E),
+}
+
+pub impl Result {
+    // Returns true if the result is Ok
+    pub fn is_ok(self) -> bool {
+        match self {
+            Ok(_) => true,
+            Err(_) => false,
+        }
+    }
+
+    // Returns true if the result is Err
+    pub fn is_err(self) -> bool {
+        match self {
+            Ok(_) => false,
+            Err(_) => true,
+        }
+    }
+}
