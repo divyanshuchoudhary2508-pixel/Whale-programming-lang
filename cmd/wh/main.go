@@ -108,6 +108,34 @@ func main() {
 	}
 }
 
+func findCompiler() (string, error) {
+	// Try PATH first
+	if path, err := exec.LookPath("clang"); err == nil {
+		return path, nil
+	}
+	if path, err := exec.LookPath("gcc"); err == nil {
+		return path, nil
+	}
+
+	if runtime.GOOS == "windows" {
+		// Common Windows LLVM and MinGW paths
+		paths := []string{
+			`C:\Program Files\LLVM\bin\clang.exe`,
+			`C:\Program Files (x86)\LLVM\bin\clang.exe`,
+			`C:\msys64\mingw64\bin\clang.exe`,
+			`C:\msys64\mingw64\bin\gcc.exe`,
+			`C:\MinGW\bin\gcc.exe`,
+		}
+		for _, p := range paths {
+			if _, err := os.Stat(p); err == nil {
+				return p, nil
+			}
+		}
+	}
+
+	return "", fmt.Errorf("could not find clang or gcc in PATH or standard locations")
+}
+
 // cmdRun runs a Whale source file.
 func cmdRun(args ...string) {
 	useVM := false
@@ -213,7 +241,13 @@ func cmdRun(args ...string) {
 			clangArgs = append([]string{"-O3"}, clangArgs...)
 		}
 		
-		cmd := exec.Command("clang", clangArgs...)
+		compilerPath, err := findCompiler()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Compilation failed: %v\n", err)
+			os.Exit(1)
+		}
+		
+		cmd := exec.Command(compilerPath, clangArgs...)
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr
 		if err := cmd.Run(); err != nil {
