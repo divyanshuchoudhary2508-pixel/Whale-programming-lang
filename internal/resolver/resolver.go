@@ -191,6 +191,10 @@ func rewriteGlobals(file *ast.File, prefix string) {
 			walk(n.Value)
 		case *ast.ChanRecvExpr:
 			walk(n.Chan)
+		case *ast.TryExpr:
+			walk(n.Expr)
+		case *ast.ErrorLit:
+			walk(n.Msg)
 		}
 	}
 
@@ -265,6 +269,10 @@ func rewriteModuleAccesses(file *ast.File, aliases map[string]bool) {
 				walkExpr(&v)
 				n.Fields[k] = v
 			}
+		case *ast.TryExpr:
+			walkExpr(&n.Expr)
+		case *ast.ErrorLit:
+			walkExpr(&n.Msg)
 		case *ast.ListLit:
 			for i := range n.Values {
 				walkExpr(&n.Values[i])

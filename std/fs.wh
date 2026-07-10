@@ -1,23 +1,50 @@
 // std::fs
 // High-performance file I/O for data processing
 
+// Raw C-FFI Bindings for native LLVM performance
 extern fn fopen(filename: string, mode: string) -> int;
 extern fn fclose(fileptr: int) -> int;
 extern fn fread(ptr: int, size: int, nmemb: int, fileptr: int) -> int;
 extern fn fwrite(ptr: int, size: int, nmemb: int, fileptr: int) -> int;
 
-pub fn open(filename: string, mode: string) -> int {
-    return fopen(filename, mode);
+// Safe File abstraction
+pub struct File {
+    ptr: int,
+    filename: string,
 }
 
-pub fn close(fileptr: int) {
-    fclose(fileptr);
+pub impl File {
+    // Closes the file descriptor safely.
+    pub fn close(self) -> Result<int> {
+        let res = fclose(self.ptr);
+        if res != 0 {
+            return error("failed to close file: " + self.filename);
+        }
+        return Ok(0);
+    }
 }
 
-pub fn read(ptr: int, size: int, nmemb: int, fileptr: int) -> int {
-    return fread(ptr, size, nmemb, fileptr);
+// Opens a file using the underlying OS primitives.
+// Returns an error if the file cannot be opened.
+pub fn open(filename: string, mode: string) -> Result<File> {
+    let ptr = fopen(filename, mode);
+    if ptr == 0 {
+        return error("failed to open file: " + filename);
+    }
+    return Ok(File {
+        ptr: ptr,
+        filename: filename,
+    });
 }
 
-pub fn write(ptr: int, size: int, nmemb: int, fileptr: int) -> int {
-    return fwrite(ptr, size, nmemb, fileptr);
+// High-level utility: Reads an entire file into a string safely.
+// This delegates to the interpreter/compiler built-ins for maximum throughput.
+pub fn read_to_string(filename: string) -> Result<string> {
+    // The underlying read_file is heavily optimized by the compiler/interpreter
+    return read_file(filename); 
+}
+
+// High-level utility: Writes a string to a file safely.
+pub fn write_string(filename: string, data: string) -> Result<int> {
+    return write_file(filename, data);
 }

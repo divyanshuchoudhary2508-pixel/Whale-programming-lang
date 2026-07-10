@@ -450,6 +450,16 @@ func (i *Interpreter) evalStmt(s ast.Stmt) {
 		i.evalSpawn(s)
 	case *ast.ChanSendStmt:
 		i.evalChanSend(s)
+	case *ast.ExternFnStmt:
+		// Extern functions are handled by LLVM. In the interpreter, they are either
+		// replaced by builtins or unavailable. We simply ignore the declaration.
+	case *ast.TraitDecl:
+		// Traits are purely for compile-time type checking. Ignore at runtime.
+	case *ast.ImplDecl:
+		// Evaluate the methods so they exist in the environment (e.g. for module exports)
+		for _, method := range s.Methods {
+			i.evalFnDecl(method)
+		}
 	case *ast.BlockStmt:
 		i.evalBlock(s)
 	default:
@@ -1493,8 +1503,7 @@ func (i *Interpreter) callTypeOf(e *ast.CallExpr) Value {
 
 func (i *Interpreter) callReadFile(e *ast.CallExpr) Value {
 	if len(e.Args) != 1 {
-		i.err(e.Pos, fmt.Sprintf("read_file() takes 1 argument, got %d", len(e.Args)))
-		return nullValue{}
+		return enumValue{Variant: "Err", Payload: stringValue{v: "read_file takes exactly 1 argument"}}
 	}
 	path := i.evalExpr(e.Args[0])
 	if len(i.errs) > 0 {
@@ -1502,15 +1511,13 @@ func (i *Interpreter) callReadFile(e *ast.CallExpr) Value {
 	}
 	ps, ok := path.(stringValue)
 	if !ok {
-		i.err(e.Pos, "read_file() requires a string path")
-		return nullValue{}
+		return enumValue{Variant: "Err", Payload: stringValue{v: "read_file requires a string path"}}
 	}
 	data, err := os.ReadFile(ps.v)
 	if err != nil {
-		i.err(e.Pos, fmt.Sprintf("read_file(%q): %v", ps.v, err))
-		return nullValue{}
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}}
 	}
-	return stringValue{v: string(data)}
+	return enumValue{Variant: "Ok", Payload: stringValue{v: string(data)}}
 }
 
 func (i *Interpreter) callMakeChan(e *ast.CallExpr) Value {
@@ -1523,8 +1530,7 @@ func (i *Interpreter) callMakeChan(e *ast.CallExpr) Value {
 
 func (i *Interpreter) callWriteFile(e *ast.CallExpr) Value {
 	if len(e.Args) != 2 {
-		i.err(e.Pos, fmt.Sprintf("write_file() takes 2 arguments, got %d", len(e.Args)))
-		return nullValue{}
+		return enumValue{Variant: "Err", Payload: stringValue{v: "write_file takes exactly 2 arguments"}}
 	}
 	path := i.evalExpr(e.Args[0])
 	if len(i.errs) > 0 {
@@ -1532,8 +1538,7 @@ func (i *Interpreter) callWriteFile(e *ast.CallExpr) Value {
 	}
 	ps, ok := path.(stringValue)
 	if !ok {
-		i.err(e.Pos, "write_file() requires a string path")
-		return nullValue{}
+		return enumValue{Variant: "Err", Payload: stringValue{v: "write_file requires a string path"}}
 	}
 	content := i.evalExpr(e.Args[1])
 	if len(i.errs) > 0 {
@@ -1541,14 +1546,12 @@ func (i *Interpreter) callWriteFile(e *ast.CallExpr) Value {
 	}
 	cs, ok := content.(stringValue)
 	if !ok {
-		i.err(e.Pos, "write_file() requires string content")
-		return nullValue{}
+		return enumValue{Variant: "Err", Payload: stringValue{v: "write_file requires string content"}}
 	}
 	if err := os.WriteFile(ps.v, []byte(cs.v), 0644); err != nil {
-		i.err(e.Pos, fmt.Sprintf("write_file(%q): %v", ps.v, err))
-		return nullValue{}
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}}
 	}
-	return nullValue{}
+	return enumValue{Variant: "Ok", Payload: intValue{v: int64(len(cs.v))}}
 }
 
 func (i *Interpreter) callLines(e *ast.CallExpr) Value {
