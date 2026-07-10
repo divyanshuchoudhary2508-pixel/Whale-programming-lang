@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/whale-lang/whale/internal/lexer"
 	"github.com/whale-lang/whale/internal/parser"
@@ -25,8 +26,15 @@ func NewFileLoader(baseDir string) *FileLoader {
 
 // Import is called by the type checker when it sees `import "path"`.
 func (l *FileLoader) Import(path string) (*types.Scope, error) {
-	// For now, only handle local files
-	if !filepath.IsAbs(path) {
+	// Check for standard library
+	if strings.HasPrefix(path, "std/") {
+		whaleRoot := os.Getenv("WHALE_ROOT")
+		if whaleRoot == "" {
+			// Fallback for development if WHALE_ROOT is not set
+			whaleRoot = "."
+		}
+		path = filepath.Join(whaleRoot, path)
+	} else if !filepath.IsAbs(path) {
 		path = filepath.Join(l.BaseDir, path)
 	}
 

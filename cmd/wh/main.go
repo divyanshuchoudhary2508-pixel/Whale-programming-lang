@@ -21,12 +21,15 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/whale-lang/whale/internal/ast"
 	"github.com/whale-lang/whale/internal/compiler"
 	"github.com/whale-lang/whale/internal/interp"
 	"github.com/whale-lang/whale/internal/lexer"
 	"github.com/whale-lang/whale/internal/llvm"
+	"github.com/whale-lang/whale/internal/lsp"
 	"github.com/whale-lang/whale/internal/optimize"
 	"github.com/whale-lang/whale/internal/parser"
+	"github.com/whale-lang/whale/internal/pkg"
 	"github.com/whale-lang/whale/internal/resolver"
 	"github.com/whale-lang/whale/internal/types"
 	"github.com/whale-lang/whale/internal/vm"
@@ -52,6 +55,31 @@ func main() {
 			fatalf("usage: wh parse <file.wh>")
 		}
 		cmdParse(os.Args[2])
+	case "fmt":
+		if len(os.Args) < 3 {
+			fmt.Println("Usage: wh fmt <file.wh>")
+			os.Exit(1)
+		}
+		cmdFmt(os.Args[2])
+	case "lsp":
+		lsp.Serve()
+	case "build":
+		// Handle both `wh build` (project) and `wh build <file>` (single file)
+		if len(os.Args) >= 3 && !strings.HasPrefix(os.Args[2], "-") {
+			cmdBuild(os.Args[2])
+		} else {
+			cmdBuildProject()
+		}
+	case "init":
+		if len(os.Args) < 3 {
+			fatalf("usage: wh init <project_name>")
+		}
+		cmdInit(os.Args[2])
+	case "get":
+		if len(os.Args) < 3 {
+			fatalf("usage: wh get <pkg>")
+		}
+		cmdGet(os.Args[2])
 	case "tokens":
 		if len(os.Args) < 3 {
 			fatalf("usage: wh tokens <file.wh>")
@@ -256,17 +284,112 @@ func cmdParse(path string) {
 func cmdTokens(path string) {
 	src, err := os.ReadFile(path)
 	if err != nil {
-		fatalf("wh: cannot read %s: %v", path, err)
+		fmt.Println("Error reading file:", err)
+		os.Exit(1)
 	}
-	result := lexer.Lex(string(src))
-	if len(result.Errors) > 0 {
-		for _, e := range result.Errors {
-			fmt.Fprintf(os.Stderr, "%s: %s\n", path, e.Error())
+	res := lexer.Lex(string(src))
+	for _, err := range res.Errors {
+		fmt.Printf("Lex error at %d:%d: %s\n", err.Pos.Line, err.Pos.Column, err.Msg)
+	}
+	for _, tok := range res.Tokens {
+		fmt.Printf("%-12s %-20q %d:%d\n", tok.Type.String(), tok.Literal, tok.Pos.Line, tok.Pos.Column)
+	}
+}
+
+func cmdFmt(path string) {
+	src, err := os.ReadFile(path)
+	if err != nil {
+		fmt.Println("Error reading file:", err)
+		os.Exit(1)
+	}
+
+	// Lex
+	lexRes := lexer.Lex(string(src))
+	if len(lexRes.Errors) > 0 {
+		fmt.Println("Lex errors:")
+		for _, e := range lexRes.Errors {
+			fmt.Printf("  %d:%d: %s\n", e.Pos.Line, e.Pos.Column, e.Msg)
 		}
+		os.Exit(1)
 	}
-	for _, tok := range result.Tokens {
-		fmt.Printf("%-12s %-20q  %d:%d\n", tok.Type, tok.Literal, tok.Line, tok.Col)
+
+	// Parse
+	parseRes := parser.Parse(lexRes.Tokens)
+	if len(parseRes.Errors) > 0 {
+		fmt.Println("Parse errors:")
+		for _, e := range parseRes.Errors {
+			fmt.Printf("  %d:%d: %s\n", e.Pos.Line, e.Pos.Column, e.Msg)
+		}
+		os.Exit(1)
 	}
+
+	// Format
+	formatted := ast.Format(parseRes.File)
+	
+	// Write back
+	err = os.WriteFile(path, []byte(formatted), 0644)
+	if err != nil {
+		fmt.Println("Error writing file:", err)
+		os.Exit(1)
+	}
+	fmt.Printf("Formatted %s\n", path)
+}
+
+func cmdInit(name string) {
+	fmt.Printf("Initializing project %s...\n", name)
+	if err := os.Mkdir(name, 0755); err != nil && !os.IsExist(err) {
+		fatalf("failed to create directory: %v", err)
+	}
+	if err := os.Mkdir(filepath.Join(name, "src"), 0755); err != nil && !os.IsExist(err) {
+		fatalf("failed to create src directory: %v", err)
+	}
+
+	conf := &pkg.Config{
+		Name:    name,
+		Version: "0.1.0",
+		Dependencies: make(map[string]string),
+	}
+	if err := pkg.SaveConfig(name, conf); err != nil {
+		fatalf("failed to save wh.toml: %v", err)
+	}
+
+	mainWh := filepath.Join(name, "src", "main.wh")
+	if err := os.WriteFile(mainWh, []byte("fn main() {\n    print(\"Hello from " + name + "!\");\n}\n"), 0644); err != nil {
+		fatalf("failed to create main.wh: %v", err)
+	}
+	fmt.Println("Project created successfully.")
+}
+
+func cmdGet(pkgName string) {
+	fmt.Printf("Fetching package %s...\n", pkgName)
+	conf, err := pkg.LoadConfig(".")
+	if err != nil {
+		fatalf("not in a whale project (wh.toml missing): %v", err)
+	}
+	// Stub: just add to dependencies
+	conf.Dependencies[pkgName] = "latest"
+	if err := pkg.SaveConfig(".", conf); err != nil {
+		fatalf("failed to update wh.toml: %v", err)
+	}
+	fmt.Printf("Added %s to dependencies.\n", pkgName)
+}
+
+func cmdBuildProject() {
+	conf, err := pkg.LoadConfig(".")
+	if err != nil {
+		fatalf("not in a whale project (wh.toml missing): %v", err)
+	}
+	fmt.Printf("Building project %s v%s...\n", conf.Name, conf.Version)
+	mainWh := filepath.Join("src", "main.wh")
+	if _, err := os.Stat(mainWh); err != nil {
+		fatalf("src/main.wh not found")
+	}
+	cmdBuild(mainWh)
+}
+
+func cmdBuild(filename string) {
+	// Alias for run --llvm
+	cmdRun("--llvm", filename)
 }
 
 // cmdCheck type-checks a file and reports errors.
@@ -365,6 +488,10 @@ func printHelp() {
 Usage:
   wh run <file.wh>     Run a Whale program
   wh parse <file.wh>   Parse and print the AST
+  wh fmt <file.wh>     Format a file in place
+  wh lsp               Start the language server
+  wh init <name>       Initialize a new project
+  wh get <pkg>         Add a dependency
   wh tokens <file.wh>  Lex and print tokens
   wh check <file.wh>   Type-check a file
   wh repl              Start the interactive REPL

@@ -109,6 +109,36 @@ func (s *AssignStmt) String() string {
 	return s.Name + " = " + s.Value.String() + ";"
 }
 
+// AssignFieldStmt is an assignment to a struct field.
+//	obj.field = x;
+type AssignFieldStmt struct {
+	Pos    Position
+	Object Expr
+	Field  string
+	Value  Expr
+}
+
+func (s *AssignFieldStmt) nodeMarker() {}
+func (s *AssignFieldStmt) stmtMarker() {}
+func (s *AssignFieldStmt) String() string {
+	return s.Object.String() + "." + s.Field + " = " + s.Value.String() + ";"
+}
+
+// AssignIndexStmt is an assignment to a list or array index.
+//	arr[i] = x;
+type AssignIndexStmt struct {
+	Pos   Position
+	List  Expr
+	Index Expr
+	Value Expr
+}
+
+func (s *AssignIndexStmt) nodeMarker() {}
+func (s *AssignIndexStmt) stmtMarker() {}
+func (s *AssignIndexStmt) String() string {
+	return s.List.String() + "[" + s.Index.String() + "] = " + s.Value.String() + ";"
+}
+
 // ExprStmt is an expression used as a statement.
 //
 //	print(x);
@@ -161,6 +191,18 @@ type WhileStmt struct {
 	Pos       Position
 	Condition Expr
 	Body      *BlockStmt
+}
+
+// ArenaStmt represents an arena { ... } allocation block.
+type ArenaStmt struct {
+	Pos  Position
+	Body *BlockStmt
+}
+
+func (s *ArenaStmt) nodeMarker() {}
+func (s *ArenaStmt) stmtMarker() {}
+func (s *ArenaStmt) String() string {
+	return "arena " + s.Body.String()
 }
 
 func (s *WhileStmt) nodeMarker() {}
@@ -270,6 +312,36 @@ func (s *FnStmt) String() string {
 	return out
 }
 
+// ExternFnStmt is a top-level foreign function declaration.
+//	extern fn printf(fmt: string, val: int) -> int;
+type ExternFnStmt struct {
+	Pos        Position
+	Name       string
+	Params     []Param
+	ReturnType string
+}
+
+func (s *ExternFnStmt) nodeMarker() {}
+func (s *ExternFnStmt) stmtMarker() {}
+func (s *ExternFnStmt) String() string {
+	out := "extern fn " + s.Name + "("
+	for i, p := range s.Params {
+		if i > 0 {
+			out += ", "
+		}
+		out += p.Name
+		if p.Type != "" {
+			out += ": " + p.Type
+		}
+	}
+	out += ")"
+	if s.ReturnType != "" {
+		out += " -> " + s.ReturnType
+	}
+	out += ";"
+	return out
+}
+
 // StructDecl is a struct type declaration.
 //
 //	struct Point { x: int, y: int }
@@ -278,12 +350,17 @@ type StructDecl struct {
 	Name       string
 	TypeParams []string
 	Fields     []Param
+	Packed     bool
 }
 
 func (s *StructDecl) nodeMarker() {}
 func (s *StructDecl) stmtMarker() {}
 func (s *StructDecl) String() string {
-	out := "struct " + s.Name
+	out := ""
+	if s.Packed {
+		out += "packed "
+	}
+	out += "struct " + s.Name
 	if len(s.TypeParams) > 0 {
 		out += "<" + strings.Join(s.TypeParams, ", ") + ">"
 	}

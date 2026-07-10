@@ -1,38 +1,72 @@
-import "lib/fs" as fs;
-import "lib/net" as net;
-import "lib/map" as map;
+import "std/memory";
+import "std/string";
+import "std/fs";
+import "std/net";
+import "std/time";
+import "std/thread";
+import "std/sync";
+import "std/json";
+import "std/http";
+
+extern fn my_thread_func(arg: int) -> int;
 
 fn main() {
-    print("Testing the Map Module...");
-    let m = map.new();
-    map.set(m, "Whale", "100 Points");
-    print("Whale Score: ", map.get(m, "Whale"));
-
-    print("Testing the Net Module...");
-    // Let's spawn a quick echo server
-    spawn server();
+    let msg = "Whale C-FFI is incredibly fast and memory safe!";
     
-    // Wait for server to start
-    let conn = net.dial("127.0.0.1", 8080);
-    if conn == 0 - 1 {
-        print("Failed to connect to local server.");
-    } else {
-        print("Connected to local server!");
-        net.send(conn, "Hello Server!");
-        let response = net.recv(conn);
-        print("Echoed: ", response);
-        net.close(conn);
-    }
-}
+    let length = string.len(msg);
+    print(length); // Output length of string
 
-fn server() {
-    let s = net.listen(8080);
-    if s != 0 - 1 {
-        let conn = net.accept(s);
-        let req = net.recv(conn);
-        net.send(conn, req); // echo
-        net.close(conn);
+    // Test memory
+    let ptr = memory.alloc(length + 1);
+    if ptr != 0 {
+        print(ptr); // should print memory address
+        memory.dealloc(ptr);
     }
+    
+    // Test fs
+    let file = fs.open("test_output.txt", "w");
+    if file != 0 {
+        print(file); // should print file descriptor/pointer
+        fs.close(file);
+    }
+    
+    // Test time
+    let current_time = time.now();
+    print(current_time);
+    
+    // Test net
+    // AF_INET = 2, SOCK_STREAM = 1, IPPROTO_TCP = 6
+    let sockfd = net.create_socket(2, 1, 6);
+    if sockfd != 0 {
+        print(sockfd);
+        // We'd close it with close(sockfd) from unistd but let's just test creation
+    }
+    
+    // Test concurrency
+    let mut m = sync.new_mutex();
+    sync.lock(m);
+    sync.unlock(m);
+    print("Mutex initialized and tested");
+    
+    let arg = 42;
+    // We cannot easily pass a function pointer in this basic test without a real C function,
+    // but we'll just test that the compiler can resolve `thread.spawn`.
+    // let t = thread.spawn(my_thread_func, &arg);
+    // thread.join(t);
+
+    // Test JSON
+    let j_str = json.new_string("hello JSON");
+    let encoded = json.encode(j_str);
+    print(encoded);
+
+    // Test HTTP
+    let resp = http.get("http://example.com");
+    print(resp.status_code);
+    
+    let server = http.listen(8080);
+    http.close(server);
+
+    print("Standard library tests completed successfully.");
 }
 
 main();

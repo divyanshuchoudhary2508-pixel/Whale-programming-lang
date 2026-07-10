@@ -1,0 +1,12 @@
+packed struct Packet {
+    header: u4,
+    version: u4,
+    payload: u12,
+}
+
+fn main() {
+    let p = Packet { header: 10, version: 1, payload: 4095 };
+    print("Header: ", p.header);
+}
+
+main();

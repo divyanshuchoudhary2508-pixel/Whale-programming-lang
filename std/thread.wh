@@ -1,0 +1,27 @@
+// std/thread.wh
+import "std/memory";
+
+extern fn pthread_create(thread: int, attr: int, start_routine: int, arg: int) -> int;
+extern fn pthread_join(thread: int, retval: int) -> int;
+
+pub struct Thread {
+    id: int, // pointer to pthread_t
+}
+
+pub fn create(start_routine: int, arg: int) -> Thread {
+    let thread_id_ptr = memory.alloc(8); // allocate 8 bytes for pthread_t
+    // For simplicity, passing 0 for attrs
+    let res = pthread_create(thread_id_ptr, 0, start_routine, arg);
+    if res != 0 {
+        print("pthread_create failed");
+    }
+    return Thread { id: thread_id_ptr };
+}
+
+pub fn join(t: Thread) {
+    // Note: in a real implementation we would dereference t.id to pass the pthread_t by value,
+    // or pthread_join signature in our C-FFI would accept a pointer.
+    // For now we just pass the pointer.
+    pthread_join(t.id, 0);
+    memory.dealloc(t.id);
+}

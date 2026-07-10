@@ -24,12 +24,14 @@ type Program struct {
 	Structs   []*StructDecl
 	Enums     []*EnumDecl
 	Functions []*FuncDecl
+	Externs   []*ExternFuncDecl
 }
 
 // StructDecl: struct Name { Fields... }
 type StructDecl struct {
 	Name   string
 	Fields []Param
+	Packed bool
 }
 
 // EnumDecl: enum Name { Variants... }
@@ -49,6 +51,13 @@ type FuncDecl struct {
 	Params     []Param
 	ReturnType Type // return type of the function
 	Body       []Stmt
+}
+
+// ExternFuncDecl is an external C function declaration: extern fn printf(fmt: string) -> int;
+type ExternFuncDecl struct {
+	Name       string
+	Params     []Param
+	ReturnType Type // return type of the function
 }
 
 type Param struct {
@@ -92,6 +101,11 @@ type IfStmt struct {
 	Else []Stmt
 }
 
+// ArenaStmt: arena { ... }
+type ArenaStmt struct {
+	Body []Stmt
+}
+
 // ExprStmt wraps an expression used as a statement, e.g. a bare function call:
 // print("hello")
 type ExprStmt struct {
@@ -110,7 +124,14 @@ type AssignStmt struct {
 	Value Expr
 }
 
-// AssignIndexStmt: list[index] = value
+// AssignFieldStmt: obj.field = value
+type AssignFieldStmt struct {
+	Object Expr
+	Field  string
+	Value  Expr
+}
+
+// AssignIndexStmt: arr[index] = value
 type AssignIndexStmt struct {
 	List  Expr
 	Index Expr
@@ -123,9 +144,11 @@ func (*IfStmt) stmtNode()          {}
 func (*ExprStmt) stmtNode()        {}
 func (*WhileStmt) stmtNode()       {}
 func (*AssignStmt) stmtNode()      {}
+func (*AssignFieldStmt) stmtNode() {}
 func (*AssignIndexStmt) stmtNode() {}
 func (*SpawnStmt) stmtNode()       {}
 func (*ChanSendStmt) stmtNode()    {}
+func (*ArenaStmt) stmtNode()       {}
 
 // SpawnStmt: spawn call
 type SpawnStmt struct {

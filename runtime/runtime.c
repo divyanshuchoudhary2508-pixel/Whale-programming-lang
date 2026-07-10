@@ -81,7 +81,72 @@ void whale_gc_run() {
     pthread_mutex_unlock(&whale_gc_mutex);
 }
 
+// ---------------------------------------------------------
+// Arena Allocator
+// ---------------------------------------------------------
+
+#define ARENA_SIZE (1024 * 1024 * 4) // 4MB per arena block
+
+typedef struct ArenaBlock {
+    char data[ARENA_SIZE];
+    size_t offset;
+    struct ArenaBlock* next;
+} ArenaBlock;
+
+// Use thread-local variables so arenas are thread-safe and lock-free
+__thread ArenaBlock* current_arena = NULL;
+__thread int arena_depth = 0;
+
+void whale_arena_push() {
+    arena_depth++;
+    if (current_arena == NULL) {
+        current_arena = malloc(sizeof(ArenaBlock));
+        current_arena->offset = 0;
+        current_arena->next = NULL;
+    }
+}
+
+void whale_arena_pop() {
+    arena_depth--;
+    if (arena_depth == 0 && current_arena != NULL) {
+        // Reset all blocks instead of freeing to avoid re-allocating (bump allocator)
+        ArenaBlock* block = current_arena;
+        while (block) {
+            block->offset = 0;
+            block = block->next;
+        }
+    }
+}
+
+void* whale_arena_alloc(size_t size) {
+    if (!current_arena) return NULL;
+    
+    // Find a block with enough space
+    ArenaBlock* block = current_arena;
+    while (block->offset + size > ARENA_SIZE) {
+        if (!block->next) {
+            block->next = malloc(sizeof(ArenaBlock));
+            block->next->offset = 0;
+            block->next->next = NULL;
+        }
+        block = block->next;
+    }
+    
+    void* ptr = block->data + block->offset;
+    block->offset += size;
+    
+    // Zero out memory to match calloc semantics
+    memset(ptr, 0, size);
+    return ptr;
+}
+
 void* whale_malloc(size_t size) {
+    // If we are currently inside an arena { ... } block,
+    // completely bypass the GC and use the lock-free Bump Allocator!
+    if (arena_depth > 0) {
+        return whale_arena_alloc(size);
+    }
+    
     if (whale_allocated_bytes + size > whale_gc_threshold && whale_stack_top != NULL) {
         whale_gc_run();
     }

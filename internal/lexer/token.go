@@ -76,6 +76,9 @@ const (
 	TOKEN_CHAN
 	TOKEN_COMPTIME
 	TOKEN_ERROR
+	TOKEN_ARENA
+	TOKEN_PACKED
+	TOKEN_EXTERN
 )
 
 // keywords maps reserved identifier strings to their token types.
@@ -104,6 +107,9 @@ var keywords = map[string]TokenType{
 	"chan":   TOKEN_CHAN,
 	"comptime": TOKEN_COMPTIME,
 	"error":  TOKEN_ERROR,
+	"arena":  TOKEN_ARENA,
+	"packed": TOKEN_PACKED,
+	"extern": TOKEN_EXTERN,
 }
 
 // String returns a human-readable name for the token type.
@@ -231,6 +237,12 @@ func (t TokenType) String() string {
 		return "comptime"
 	case TOKEN_ERROR:
 		return "error"
+	case TOKEN_ARENA:
+		return "arena"
+	case TOKEN_PACKED:
+		return "packed"
+	case TOKEN_EXTERN:
+		return "extern"
 	default:
 		return "UNKNOWN"
 	}

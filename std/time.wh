@@ -1,0 +1,9 @@
+// std::time
+// High-resolution timers and timing functions
+
+extern fn time(tloc: int) -> int;
+
+pub fn now() -> int {
+    // Pass 0 (NULL) to get current time
+    return time(0);
+}

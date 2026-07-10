@@ -1,0 +1,30 @@
+// std/sync.wh
+import "std/memory";
+
+extern fn pthread_mutex_init(mutex: int, attr: int) -> int;
+extern fn pthread_mutex_lock(mutex: int) -> int;
+extern fn pthread_mutex_unlock(mutex: int) -> int;
+extern fn pthread_mutex_destroy(mutex: int) -> int;
+
+pub struct Mutex {
+    ptr: int, // pointer to pthread_mutex_t (typically 64 bytes)
+}
+
+pub fn new_mutex() -> Mutex {
+    let ptr = memory.alloc(64); 
+    pthread_mutex_init(ptr, 0);
+    return Mutex { ptr: ptr };
+}
+
+pub fn lock(m: Mutex) {
+    pthread_mutex_lock(m.ptr);
+}
+
+pub fn unlock(m: Mutex) {
+    pthread_mutex_unlock(m.ptr);
+}
+
+pub fn destroy(m: Mutex) {
+    pthread_mutex_destroy(m.ptr);
+    memory.dealloc(m.ptr);
+}

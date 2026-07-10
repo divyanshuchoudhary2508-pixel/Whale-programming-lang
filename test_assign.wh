@@ -1,0 +1,18 @@
+struct Point {
+    x: int,
+    y: int,
+}
+
+fn main() {
+    let p = Point { x: 1, y: 2 };
+    p.x = 100;
+    p.y = 200;
+    print(p.x);
+    print(p.y);
+    
+    let arr = [1, 2, 3];
+    arr[0] = 99;
+    print(arr[0]);
+}
+
+main();

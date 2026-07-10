@@ -1,0 +1,23 @@
+// std::fs
+// High-performance file I/O for data processing
+
+extern fn fopen(filename: string, mode: string) -> int;
+extern fn fclose(fileptr: int) -> int;
+extern fn fread(ptr: int, size: int, nmemb: int, fileptr: int) -> int;
+extern fn fwrite(ptr: int, size: int, nmemb: int, fileptr: int) -> int;
+
+pub fn open(filename: string, mode: string) -> int {
+    return fopen(filename, mode);
+}
+
+pub fn close(fileptr: int) {
+    fclose(fileptr);
+}
+
+pub fn read(ptr: int, size: int, nmemb: int, fileptr: int) -> int {
+    return fread(ptr, size, nmemb, fileptr);
+}
+
+pub fn write(ptr: int, size: int, nmemb: int, fileptr: int) -> int {
+    return fwrite(ptr, size, nmemb, fileptr);
+}

@@ -56,8 +56,9 @@ type ServerInfo struct {
 }
 
 type ServerCapabilities struct {
-	TextDocumentSync   int                  `json:"textDocumentSync"`   // 1 = Full
-	HoverProvider      bool                 `json:"hoverProvider"`
+	TextDocumentSync           int                  `json:"textDocumentSync"`   // 1 = Full
+	DocumentFormattingProvider bool                 `json:"documentFormattingProvider"`
+	HoverProvider              bool                 `json:"hoverProvider"`
 	CompletionProvider *CompletionOptions   `json:"completionProvider,omitempty"`
 	DiagnosticProvider *DiagnosticOptions   `json:"diagnosticProvider,omitempty"`
 }

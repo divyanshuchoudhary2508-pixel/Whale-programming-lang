@@ -1,0 +1,45 @@
+// std/http.wh
+// Advanced HTTP networking
+
+import "std/net";
+import "std/string";
+import "std/memory";
+
+pub struct Response {
+    status_code: int,
+    body: string,
+}
+
+pub struct Server {
+    port: int,
+    socket: int,
+}
+
+// Basic HTTP GET request
+pub fn get(url: string) -> Response {
+    // In a full implementation, we'd parse the URL, resolve the DNS, 
+    // connect a TCP socket, and send the HTTP GET request.
+    // For now we simulate the response.
+    return Response {
+        status_code: 200,
+        body: "{\"status\": \"ok\"}",
+    };
+}
+
+// Create a new HTTP server
+pub fn listen(port: int) -> Server {
+    // We would use std/net here. For example:
+    // let sockfd = net.create_socket(2, 1, 6);
+    // net.bind(sockfd, port);
+    // net.listen(sockfd, 10);
+    
+    // For the mock, we just return a Server struct.
+    return Server {
+        port: port,
+        socket: 0,
+    };
+}
+
+pub fn close(s: Server) {
+    // net.close(s.socket);
+}

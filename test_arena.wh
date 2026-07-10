@@ -1,0 +1,8 @@
+fn main() {
+    arena {
+        let x = 10;
+        print("Inside arena: ", x);
+    }
+}
+
+main();

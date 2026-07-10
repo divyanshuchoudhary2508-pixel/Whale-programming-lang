@@ -30,6 +30,7 @@ func Lower(file *ast.File, typeMap map[ast.Expr]types.Type) (*Program, error) {
 			out.Structs = append(out.Structs, &StructDecl{
 				Name:   structDecl.Name,
 				Fields: params,
+				Packed: structDecl.Packed,
 			})
 		} else if enumDecl, ok := stmt.(*ast.EnumDecl); ok {
 			variants := make([]EnumVariant, len(enumDecl.Variants))
@@ -61,9 +62,41 @@ func Lower(file *ast.File, typeMap map[ast.Expr]types.Type) (*Program, error) {
 				return nil, err
 			}
 			out.Functions = append(out.Functions, llvmFn)
+		} else if ext, ok := stmt.(*ast.ExternFnStmt); ok {
+			llvmExt, err := l.lowerExternFunc(ext)
+			if err != nil {
+				return nil, err
+			}
+			out.Externs = append(out.Externs, llvmExt)
 		}
 	}
 	return out, nil
+}
+
+func (l *lowerer) lowerExternFunc(ext *ast.ExternFnStmt) (*ExternFuncDecl, error) {
+	params := make([]Param, len(ext.Params))
+	for i, p := range ext.Params {
+		typ, err := lowerType(p.Type)
+		if err != nil {
+			return nil, err
+		}
+		params[i] = Param{Name: p.Name, Type: typ}
+	}
+
+	retType := TypeVoid
+	if ext.ReturnType != "" {
+		t, err := lowerType(ext.ReturnType)
+		if err != nil {
+			return nil, err
+		}
+		retType = t
+	}
+
+	return &ExternFuncDecl{
+		Name:       ext.Name,
+		Params:     params,
+		ReturnType: retType,
+	}, nil
 }
 
 func (l *lowerer) lowerFunc(fn *ast.FnStmt) (*FuncDecl, error) {
@@ -154,6 +187,30 @@ func (l *lowerer) lowerStmt(s ast.Stmt) (Stmt, error) {
 			return nil, err
 		}
 		return &AssignStmt{Name: node.Name, Value: val}, nil
+	case *ast.AssignFieldStmt:
+		obj, err := l.lowerExpr(node.Object)
+		if err != nil {
+			return nil, err
+		}
+		val, err := l.lowerExpr(node.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &AssignFieldStmt{Object: obj, Field: node.Field, Value: val}, nil
+	case *ast.AssignIndexStmt:
+		list, err := l.lowerExpr(node.List)
+		if err != nil {
+			return nil, err
+		}
+		idx, err := l.lowerExpr(node.Index)
+		if err != nil {
+			return nil, err
+		}
+		val, err := l.lowerExpr(node.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &AssignIndexStmt{List: list, Index: idx, Value: val}, nil
 	case *ast.ExprStmt:
 		val, err := l.lowerExpr(node.Expr)
 		if err != nil {
@@ -205,6 +262,12 @@ func (l *lowerer) lowerStmt(s ast.Stmt) (Stmt, error) {
 			return nil, err
 		}
 		return &WhileStmt{Cond: cond, Body: body}, nil
+	case *ast.ArenaStmt:
+		body, err := l.lowerStmts(node.Body.Body)
+		if err != nil {
+			return nil, err
+		}
+		return &ArenaStmt{Body: body}, nil
 	case *ast.SpawnStmt:
 		call, ok := node.Call.Callee.(*ast.Ident)
 		if !ok {
@@ -473,37 +536,93 @@ func (l *lowerer) tryFusePipeline(target string, expr ast.Expr) ([]Stmt, bool, e
 		Value: &IndexExpr{List: &Ident{Name: srcName}, Index: &Ident{Name: iName}},
 	})
 	
+	var pipelineStmts []Stmt
 	currVal := Expr(&Ident{Name: itemName})
 	
-	for _, opExpr := range ops {
-		op := opExpr.(*ast.CallExpr)
+	for i := 0; i < len(ops); i++ {
+		op := ops[i].(*ast.CallExpr)
 		opName := op.Callee.(*ast.Ident).Name
 		closure := op.Args[1].(*ast.FnLit)
-		
 		paramName := closure.Params[0].Name
-		loopBody = append(loopBody, &LetStmt{Name: paramName, Type: elemTy, Value: currVal})
+		
+		pipelineStmts = append(pipelineStmts, &LetStmt{Name: paramName, Type: elemTy, Value: currVal})
 		
 		if opName == "map" {
 			mappedVal, err := l.lowerExpr(closure.Body.Expr)
 			if err != nil { return nil, false, err }
 			currVal = mappedVal
 		} else if opName == "filter" {
-			panic("filter not yet supported in basic pipeline fusion")
+			filterCond, err := l.lowerExpr(closure.Body.Expr)
+			if err != nil { return nil, false, err }
+			
+			// For filter, the *rest* of the pipeline (including out assignment) 
+			// must be wrapped in an IfStmt!
+			var restOps []ast.Expr
+			for j := i + 1; j < len(ops); j++ {
+				restOps = append(restOps, ops[j])
+			}
+			
+			// Recursively call a helper to process the rest?
+			// Actually, it's easier to just build the final assignment statements now
+			// and then wrap everything.
+			var innerStmts []Stmt
+			
+			// Map/Filter the rest:
+			var innerCurrVal Expr = currVal
+			for _, restOpExpr := range restOps {
+				restOp := restOpExpr.(*ast.CallExpr)
+				restOpName := restOp.Callee.(*ast.Ident).Name
+				restClosure := restOp.Args[1].(*ast.FnLit)
+				restParamName := restClosure.Params[0].Name
+				
+				innerStmts = append(innerStmts, &LetStmt{Name: restParamName, Type: elemTy, Value: innerCurrVal})
+				if restOpName == "map" {
+					mapped, err := l.lowerExpr(restClosure.Body.Expr)
+					if err != nil { return nil, false, err }
+					innerCurrVal = mapped
+				} else if restOpName == "filter" {
+					panic("multiple filters in one pipeline not yet supported by basic fusion")
+				}
+			}
+			
+			if !strings.HasPrefix(target, "expr_") {
+				innerStmts = append(innerStmts, &AssignIndexStmt{
+					List: &Ident{Name: target},
+					Index: &Ident{Name: out_iName},
+					Value: innerCurrVal,
+				})
+			}
+			innerStmts = append(innerStmts, &AssignStmt{
+				Name: out_iName,
+				Value: &BinaryExpr{Op: "+", Left: &Ident{Name: out_iName}, Right: &IntLit{Value: 1}},
+			})
+			
+			pipelineStmts = append(pipelineStmts, &IfStmt{
+				Cond: filterCond,
+				Then: innerStmts,
+			})
+			
+			// We break because we processed the rest of the ops inside the IfStmt
+			currVal = nil 
+			break
 		}
 	}
 	
-	if !strings.HasPrefix(target, "expr_") {
-		loopBody = append(loopBody, &AssignIndexStmt{
-			List: &Ident{Name: target},
-			Index: &Ident{Name: out_iName},
-			Value: currVal,
+	if currVal != nil {
+		if !strings.HasPrefix(target, "expr_") {
+			pipelineStmts = append(pipelineStmts, &AssignIndexStmt{
+				List: &Ident{Name: target},
+				Index: &Ident{Name: out_iName},
+				Value: currVal,
+			})
+		}
+		pipelineStmts = append(pipelineStmts, &AssignStmt{
+			Name: out_iName,
+			Value: &BinaryExpr{Op: "+", Left: &Ident{Name: out_iName}, Right: &IntLit{Value: 1}},
 		})
 	}
 	
-	loopBody = append(loopBody, &AssignStmt{
-		Name: out_iName,
-		Value: &BinaryExpr{Op: "+", Left: &Ident{Name: out_iName}, Right: &IntLit{Value: 1}},
-	})
+	loopBody = append(loopBody, pipelineStmts...)
 	loopBody = append(loopBody, &AssignStmt{
 		Name: iName,
 		Value: &BinaryExpr{Op: "+", Left: &Ident{Name: iName}, Right: &IntLit{Value: 1}},

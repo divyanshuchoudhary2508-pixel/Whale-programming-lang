@@ -1,0 +1,7 @@
+extern fn puts(str: string) -> int;
+
+fn main() {
+    puts("Hello from external C library using Whale C-FFI!");
+}
+
+main();

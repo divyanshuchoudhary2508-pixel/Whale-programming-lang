@@ -107,11 +107,15 @@ func tokPos(tok lexer.Token) ast.Position {
 func (p *parser) parseFile() ast.File {
 	body := make([]ast.Stmt, 0, 8)
 	for p.current().Type != lexer.TOKEN_EOF {
+		startPos := p.pos
 		stmt := p.parseStatement()
 		if stmt != nil {
 			body = append(body, stmt)
-		} else {
-			p.advance() // skip bad token, avoid infinite loop
+		}
+		
+		// If we didn't advance at all, force advance to avoid infinite loop
+		if p.pos == startPos {
+			p.advance()
 		}
 	}
 	return ast.File{Body: body}
@@ -138,18 +142,19 @@ func (p *parser) parseStatement() ast.Stmt {
 		return p.parseWhile()
 	case lexer.TOKEN_FOR:
 		return p.parseFor()
-	case lexer.TOKEN_STRUCT:
+	case lexer.TOKEN_ARENA:
+		return p.parseArena()
+	case lexer.TOKEN_STRUCT, lexer.TOKEN_PACKED:
 		return p.parseStructDecl()
 	case lexer.TOKEN_ENUM:
 		return p.parseEnumDecl()
 	case lexer.TOKEN_IMPORT:
 		return p.parseImport()
-	case lexer.TOKEN_IDENT:
-		// Lookahead: if next is '=', this is an assignment.
-		if p.peek(1).Type == lexer.TOKEN_EQ {
-			return p.parseAssign()
-		}
-		return p.parseExprStatement()
+	case lexer.TOKEN_EXTERN:
+		return p.parseExternFnDecl()
+	case lexer.TOKEN_PUB:
+		p.advance() // consume 'pub'
+		return p.parseStatement() // parse the actual statement
 	default:
 		return p.parseExprStatement()
 	}
@@ -158,15 +163,31 @@ func (p *parser) parseStatement() ast.Stmt {
 func (p *parser) parseExprStatement() ast.Stmt {
 	pos := tokPos(p.current())
 	expr := p.parseExpr()
-	if expr == nil {
-		return nil
+	
+	if p.current().Type == lexer.TOKEN_EQ {
+		p.advance() // consume '='
+		value := p.parseExpr()
+		p.expectSemi()
+		
+		if ident, ok := expr.(*ast.Ident); ok {
+			return &ast.AssignStmt{Pos: pos, Name: ident.Name, Value: value}
+		} else if field, ok := expr.(*ast.FieldAccess); ok {
+			return &ast.AssignFieldStmt{Pos: pos, Object: field.Expr, Field: field.Field, Value: value}
+		} else if idx, ok := expr.(*ast.IndexExpr); ok {
+			return &ast.AssignIndexStmt{Pos: pos, List: idx.Expr, Index: idx.Index, Value: value}
+		} else {
+			p.errorAt(p.current(), "invalid assignment target")
+			return &ast.ExprStmt{Pos: pos, Expr: expr}
+		}
 	}
+	
 	if p.current().Type == lexer.TOKEN_LARROW {
 		valPos := tokPos(p.advance()) // consume <-
 		val := p.parseExpr()
 		p.expectSemi()
 		return &ast.ChanSendStmt{Pos: valPos, Chan: expr, Value: val}
 	}
+
 	p.expectSemi()
 	return &ast.ExprStmt{Pos: pos, Expr: expr}
 }
@@ -297,14 +318,6 @@ func (p *parser) parseLet() ast.Stmt {
 	}
 }
 
-func (p *parser) parseAssign() ast.Stmt {
-	pos := tokPos(p.current())
-	name := p.advance().Literal // consume identifier
-	p.advance()                 // consume '='
-	value := p.parseExpr()
-	p.expectSemi()
-	return &ast.AssignStmt{Pos: pos, Name: name, Value: value}
-}
 
 func (p *parser) parseBlock() *ast.BlockStmt {
 	pos := tokPos(p.current())
@@ -358,6 +371,12 @@ func (p *parser) parseWhile() ast.Stmt {
 	}
 	body := p.parseBlock()
 	return &ast.WhileStmt{Pos: pos, Condition: cond, Body: body}
+}
+
+func (p *parser) parseArena() ast.Stmt {
+	pos := tokPos(p.advance()) // consume 'arena'
+	body := p.parseBlock()
+	return &ast.ArenaStmt{Pos: pos, Body: body}
 }
 
 func (p *parser) parseFor() ast.Stmt {
@@ -418,6 +437,38 @@ func (p *parser) parseFnDecl() ast.Stmt {
 	}
 }
 
+func (p *parser) parseExternFnDecl() ast.Stmt {
+	pos := tokPos(p.advance()) // consume 'extern'
+
+	if p.current().Type != lexer.TOKEN_FN {
+		p.errorAt(p.current(), "expected 'fn' after 'extern'")
+		return nil
+	}
+	p.advance() // consume 'fn'
+
+	if p.current().Type != lexer.TOKEN_IDENT {
+		p.errorAt(p.current(), "expected function name after 'extern fn'")
+		return nil
+	}
+	name := p.advance().Literal
+	params := p.parseParams()
+
+	returnType := ""
+	if p.current().Type == lexer.TOKEN_DASHARROW {
+		p.advance() // consume '->'
+		returnType = p.parseTypeString()
+	}
+
+	p.expectSemi()
+
+	return &ast.ExternFnStmt{
+		Pos:        pos,
+		Name:       name,
+		Params:     params,
+		ReturnType: returnType,
+	}
+}
+
 func (p *parser) parseParams() []ast.Param {
 	p.expect(lexer.TOKEN_LPAREN, "'('")
 	params := make([]ast.Param, 0, 2)
@@ -447,6 +498,11 @@ func (p *parser) parseParams() []ast.Param {
 }
 
 func (p *parser) parseStructDecl() ast.Stmt {
+	isPacked := false
+	if p.current().Type == lexer.TOKEN_PACKED {
+		isPacked = true
+		p.advance() // consume 'packed'
+	}
 	pos := tokPos(p.advance()) // consume 'struct'
 	if p.current().Type != lexer.TOKEN_IDENT {
 		p.errorAt(p.current(), "expected struct name after 'struct'")
@@ -475,7 +531,7 @@ func (p *parser) parseStructDecl() ast.Stmt {
 		}
 	}
 	p.expect(lexer.TOKEN_RBRACE, "'}'")
-	return &ast.StructDecl{Pos: pos, Name: name, TypeParams: typeParams, Fields: fields}
+	return &ast.StructDecl{Pos: pos, Name: name, TypeParams: typeParams, Fields: fields, Packed: isPacked}
 }
 
 func (p *parser) parseEnumDecl() *ast.EnumDecl {

@@ -1,0 +1,23 @@
+// std::net
+// Zero-overhead C-FFI networking bindings for Whale
+
+extern fn socket(domain: int, type: int, protocol: int) -> int;
+extern fn connect(sockfd: int, addr: int, addrlen: int) -> int;
+extern fn send(sockfd: int, buf: int, len: int, flags: int) -> int;
+extern fn recv(sockfd: int, buf: int, len: int, flags: int) -> int;
+
+pub fn create_socket(domain: int, type: int, protocol: int) -> int {
+    return socket(domain, type, protocol);
+}
+
+pub fn connect_socket(sockfd: int, addr: int, addrlen: int) -> int {
+    return connect(sockfd, addr, addrlen);
+}
+
+pub fn send_data(sockfd: int, buf: int, len: int, flags: int) -> int {
+    return send(sockfd, buf, len, flags);
+}
+
+pub fn receive_data(sockfd: int, buf: int, len: int, flags: int) -> int {
+    return recv(sockfd, buf, len, flags);
+}

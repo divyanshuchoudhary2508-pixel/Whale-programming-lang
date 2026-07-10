@@ -1,0 +1,8 @@
+fn main() {
+    let msg = "Hello";
+    if 1 {
+        print(msg);
+    } else {
+        print("no");
+    }
+}

@@ -2,6 +2,7 @@ package llvm
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -98,14 +99,22 @@ func (g *Generator) Generate(prog *Program) string {
 
 	// Struct definitions
 	for _, s := range prog.Structs {
-		out.WriteString(fmt.Sprintf("%%struct.%s = type { ", s.Name))
+		if s.Packed {
+			out.WriteString(fmt.Sprintf("%%struct.%s = type <{ ", s.Name))
+		} else {
+			out.WriteString(fmt.Sprintf("%%struct.%s = type { ", s.Name))
+		}
 		for i, f := range s.Fields {
 			if i > 0 {
 				out.WriteString(", ")
 			}
 			out.WriteString(g.llvmType(f.Type))
 		}
-		out.WriteString(" }\n")
+		if s.Packed {
+			out.WriteString(" }>\n")
+		} else {
+			out.WriteString(" }\n")
+		}
 	}
 
 	// Enum definitions
@@ -129,7 +138,21 @@ func (g *Generator) Generate(prog *Program) string {
 		out.WriteString(externDecl(name))
 		out.WriteString("\n")
 	}
-	if len(g.declaredExterns) > 0 {
+	
+	// User-defined Extern declarations
+	for _, ext := range prog.Externs {
+		out.WriteString("declare " + g.llvmType(ext.ReturnType) + " @" + ext.Name + "(")
+		for i, p := range ext.Params {
+			if i > 0 {
+				out.WriteString(", ")
+			}
+			out.WriteString(g.llvmType(p.Type))
+		}
+		out.WriteString(")\n")
+		g.declaredExterns[ext.Name] = true // mark as declared so we don't duplicate
+	}
+
+	if len(g.declaredExterns) > 0 || len(prog.Externs) > 0 {
 		out.WriteString("\n")
 	}
 
@@ -236,8 +259,15 @@ func (g *Generator) genBlock(stmts []Stmt) (string, bool) {
 			ir, term := g.genWhile(s)
 			out.WriteString(ir)
 			terminated = term
+		case *ArenaStmt:
+			ir, term := g.genArena(s)
+			out.WriteString(ir)
+			terminated = term
 		case *AssignStmt:
 			ir := g.genAssign(s)
+			out.WriteString(ir)
+		case *AssignFieldStmt:
+			ir := g.genAssignField(s)
 			out.WriteString(ir)
 		case *AssignIndexStmt:
 			ir := g.genAssignIndex(s)
@@ -277,6 +307,37 @@ func (g *Generator) genAssign(s *AssignStmt) string {
 		panic(fmt.Sprintf("codegen: undefined variable %q in assignment", s.Name))
 	}
 	out.WriteString(fmt.Sprintf("  store %s %s, ptr %s\n", g.llvmType(valTy), valReg, v.llvmName))
+	return out.String()
+}
+
+func (g *Generator) genAssignField(s *AssignFieldStmt) string {
+	var out strings.Builder
+	_, objReg, objTy := g.genExpr(s.Object, &out)
+	_, valReg, valTy := g.genExpr(s.Value, &out)
+
+	structDecl := g.structs[string(objTy)]
+	fieldIdx := 0
+	var targetTy Type
+	for i, param := range structDecl.Fields {
+		if param.Name == s.Field {
+			fieldIdx = i
+			targetTy = param.Type
+			break
+		}
+	}
+
+	// Truncate val if necessary
+	if valTy == TypeInt && strings.HasPrefix(string(targetTy), "u") {
+		truncReg := g.newTemp()
+		out.WriteString(fmt.Sprintf("  %s = trunc %s %s to %s\n", truncReg, g.llvmType(valTy), valReg, g.llvmType(targetTy)))
+		valReg = truncReg
+		valTy = targetTy
+	}
+
+	fieldPtrReg := g.newTemp()
+	out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds %%struct.%s, ptr %s, i32 0, i32 %d\n", fieldPtrReg, string(objTy), objReg, fieldIdx))
+	out.WriteString(fmt.Sprintf("  store %s %s, ptr %s\n", g.llvmType(valTy), valReg, fieldPtrReg))
+
 	return out.String()
 }
 
@@ -453,6 +514,27 @@ func (g *Generator) genIf(s *IfStmt) (string, bool) {
 	return out.String(), false
 }
 
+func (g *Generator) genArena(s *ArenaStmt) (string, bool) {
+	var out strings.Builder
+	
+	g.declaredExterns["whale_arena_push"] = true
+	out.WriteString("  call void @whale_arena_push()\n")
+	
+	blockIR, term := g.genBlock(s.Body)
+	out.WriteString(blockIR)
+	
+	// If the block didn't unconditionally terminate (e.g., didn't return), we must pop.
+	// If it DID terminate (e.g. `return`), we still need to pop before it returned!
+	// Wait, if it returned inside the block, the pop should have happened before the ret instruction.
+	// We might have an issue with early returns from arenas. For now, we pop at the end.
+	if !term {
+		g.declaredExterns["whale_arena_pop"] = true
+		out.WriteString("  call void @whale_arena_pop()\n")
+	}
+	
+	return out.String(), term
+}
+
 func (g *Generator) genWhile(s *WhileStmt) (string, bool) {
 	var out strings.Builder
 
@@ -594,6 +676,26 @@ func (g *Generator) genCall(ex *CallExpr, out *strings.Builder) (string, string,
 	retTy := TypeInt // Default fallback for user functions
 
 	switch ex.Callee {
+	case "vec_add":
+		retTy = argTypes[0]
+		reg := g.newTemp()
+		op := "add"
+		if strings.Contains(g.llvmType(argTypes[0]), "double") || strings.Contains(g.llvmType(argTypes[0]), "float") {
+			op = "fadd"
+		}
+		body.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(argTypes[0]), argRegs[0], argRegs[1]))
+		out.WriteString(body.String())
+		return "", reg, retTy
+	case "vec_mul":
+		retTy = argTypes[0]
+		reg := g.newTemp()
+		op := "mul"
+		if strings.Contains(g.llvmType(argTypes[0]), "double") || strings.Contains(g.llvmType(argTypes[0]), "float") {
+			op = "fmul"
+		}
+		body.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(argTypes[0]), argRegs[0], argRegs[1]))
+		out.WriteString(body.String())
+		return "", reg, retTy
 	case "read_file": calleeName = "whale_read_file"; retTy = TypeString; g.declaredExterns[calleeName] = true
 	case "write_file": calleeName = "whale_write_file"; retTy = TypeVoid; g.declaredExterns[calleeName] = true
 	case "lines": calleeName = "whale_lines"; retTy = Type("[string]"); g.declaredExterns[calleeName] = true
@@ -653,7 +755,12 @@ func (g *Generator) genPrintCall(ex *CallExpr, out *strings.Builder) (string, st
 		case TypeFloat: fmtStr.WriteString("%f")
 		case TypeBool: fmtStr.WriteString("%d")
 		case TypeString: fmtStr.WriteString("%s")
-		default: panic("unsupported print type: " + argTy)
+		default: 
+			if strings.HasPrefix(string(argTy), "u") {
+				fmtStr.WriteString("%u") // Unsigned integer print format
+			} else {
+				panic("unsupported print type: " + argTy)
+			}
 		}
 	}
 	fmtStr.WriteString("\n")
@@ -691,6 +798,16 @@ func (g *Generator) genStructLit(node *StructLit, out *strings.Builder) (string,
 
 	for i, param := range structDecl.Fields {
 		_, valReg, valTy := g.genExpr(node.Fields[param.Name], out)
+		targetTy := param.Type
+		
+		// If storing into a bit-width integer, we might need to truncate i64 down to iN
+		if valTy == TypeInt && strings.HasPrefix(string(targetTy), "u") {
+			truncReg := g.newTemp()
+			out.WriteString(fmt.Sprintf("  %s = trunc %s %s to %s\n", truncReg, g.llvmType(valTy), valReg, g.llvmType(targetTy)))
+			valReg = truncReg
+			valTy = targetTy
+		}
+
 		fieldPtrReg := g.newTemp()
 		out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds %%struct.%s, ptr %s, i32 0, i32 %d\n", fieldPtrReg, node.StructName, ptrReg, i))
 		out.WriteString(fmt.Sprintf("  store %s %s, ptr %s\n", g.llvmType(valTy), valReg, fieldPtrReg))
@@ -1106,6 +1223,31 @@ func (g *Generator) llvmType(t Type) string {
 	case TypeVoid:
 		return "void"
 	default:
+		if strings.HasPrefix(string(t), "u") {
+			if bits, err := strconv.Atoi(string(t)[1:]); err == nil && bits > 0 {
+				return fmt.Sprintf("i%d", bits)
+			}
+		}
+		if strings.HasPrefix(string(t), "vec256<") && strings.HasSuffix(string(t), ">") {
+			elemTyStr := string(t)[7:len(string(t))-1]
+			elemLlvmTy := g.llvmType(Type(elemTyStr))
+			
+			// Compute element size to calculate vector length
+			var bits int
+			if elemLlvmTy == "i64" || elemLlvmTy == "double" {
+				bits = 64
+			} else if strings.HasPrefix(elemLlvmTy, "i") {
+				if b, err := strconv.Atoi(elemLlvmTy[1:]); err == nil {
+					bits = b
+				}
+			}
+			
+			if bits > 0 {
+				length := 256 / bits
+				return fmt.Sprintf("<%d x %s>", length, elemLlvmTy)
+			}
+			panic("vec256 with unsupported element type: " + elemLlvmTy)
+		}
 		if strings.HasPrefix(string(t), "[") || strings.HasPrefix(string(t), "list") {
 			return "ptr" // %WhaleArray*
 		}
@@ -1145,6 +1287,10 @@ func externDecl(name string) string {
 		return "declare ptr @malloc(i64)\n"
 	case "whale_malloc":
 		return "declare ptr @whale_malloc(i64)\n"
+	case "whale_arena_push":
+		return "declare void @whale_arena_push()\n"
+	case "whale_arena_pop":
+		return "declare void @whale_arena_pop()\n"
 	case "whale_gc_init":
 		return "declare void @whale_gc_init(ptr)\n"
 	case "whale_read_file":

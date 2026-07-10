@@ -20,6 +20,7 @@ package types
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/whale-lang/whale/internal/ast"
@@ -37,12 +38,14 @@ type Type interface {
 }
 
 type TInt struct{}
+type TUint struct{ Bits int }
 type TFloat struct{}
 type TString struct{}
 type TBool struct{}
 type TUnit struct{}
 type TList struct{ Elem Type }
 type TStream struct{ Elem Type }
+type TVec256 struct{ Elem Type }
 type TFun struct {
 	Params []Type
 	Ret    Type
@@ -64,12 +67,14 @@ type TError struct{}
 type TResult struct{ Elem Type }
 
 func (TInt) typeMarker()     {}
+func (TUint) typeMarker()    {}
 func (TFloat) typeMarker()   {}
 func (TString) typeMarker()  {}
 func (TBool) typeMarker()    {}
 func (TUnit) typeMarker()    {}
 func (TList) typeMarker()    {}
 func (TStream) typeMarker()  {}
+func (TVec256) typeMarker()  {}
 func (TFun) typeMarker()     {}
 func (TStruct) typeMarker()  {}
 func (TEnum) typeMarker()    {}
@@ -82,6 +87,7 @@ func (TError) typeMarker()   {}
 func (TResult) typeMarker()  {}
 
 func (t TInt) String() string    { return "int" }
+func (t TUint) String() string   { return fmt.Sprintf("u%d", t.Bits) }
 func (t TFloat) String() string  { return "float" }
 func (t TString) String() string { return "string" }
 func (t TBool) String() string   { return "bool" }
@@ -97,6 +103,12 @@ func (t TStream) String() string {
 		return "stream"
 	}
 	return "stream<" + t.Elem.String() + ">"
+}
+func (t TVec256) String() string {
+	if t.Elem == nil {
+		return "vec256"
+	}
+	return "vec256<" + t.Elem.String() + ">"
 }
 func (t TFun) String() string {
 	out := "fn("
@@ -200,6 +212,7 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 		structs:   make(map[string]*ast.StructDecl),
 		enums:     make(map[string]*ast.EnumDecl),
 		funcs:     make(map[string]*ast.FnStmt),
+		externs:   make(map[string]*ast.ExternFnStmt),
 		env:       newScope(builtinScope()),
 		exprTypes: make(map[ast.Expr]Type),
 		importer:  cfg.Importer,
@@ -214,6 +227,8 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 			c.enums[s.Name] = s
 		case *ast.FnStmt:
 			c.funcs[s.Name] = s
+		case *ast.ExternFnStmt:
+			c.externs[s.Name] = s
 		}
 	}
 	// Second pass: pre-define function types and enum variants in env
@@ -222,6 +237,10 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 			fnType := c.makeFnType(s.Params, s.ReturnType, s.Pos)
 			c.env.define(name, fnType)
 		})
+	}
+	for name, s := range c.externs {
+		fnType := c.makeFnType(s.Params, s.ReturnType, s.Pos)
+		c.env.define(name, fnType)
 	}
 	for name, s := range c.enums {
 		c.withTypeParams(s.TypeParams, func() {
@@ -283,6 +302,10 @@ func builtinScope() *Scope {
 	s.define("push", TFun{Params: []Type{TList{Elem: TUnknown{}}, TUnknown{}}, Ret: TList{Elem: TUnknown{}}})
 	s.define("pop", TFun{Params: []Type{TList{Elem: TUnknown{}}}, Ret: TUnknown{}})
 	s.define("type_of", TFun{Params: []Type{TUnknown{}}, Ret: TString{}})
+	
+	// SIMD Built-ins
+	s.define("vec_add", TFun{Params: []Type{TVec256{Elem: TUnknown{}}, TVec256{Elem: TUnknown{}}}, Ret: TVec256{Elem: TUnknown{}}})
+	s.define("vec_mul", TFun{Params: []Type{TVec256{Elem: TUnknown{}}, TVec256{Elem: TUnknown{}}}, Ret: TVec256{Elem: TUnknown{}}})
 	
 	// String standard library
 	s.define("split", TFun{Params: []Type{TString{}, TString{}}, Ret: TList{Elem: TString{}}})
@@ -436,6 +459,7 @@ type checker struct {
 	structs   map[string]*ast.StructDecl
 	enums     map[string]*ast.EnumDecl
 	funcs     map[string]*ast.FnStmt
+	externs   map[string]*ast.ExternFnStmt
 	retType   Type
 	exprTypes  map[ast.Expr]Type
 	importer   Importer
@@ -489,7 +513,51 @@ func (c *checker) checkStmt(s ast.Stmt) {
 			c.env.define(s.Name, t)
 		}
 	case *ast.AssignStmt:
-		c.checkExpr(s.Value)
+		valTy := c.checkExpr(s.Value)
+		if declared, ok := c.env.get(s.Name); ok {
+			if !sameType(declared, valTy) && !isUnknown(declared) && !isUnknown(valTy) {
+				c.errorAt(s.Pos, "cannot assign %s to %s", valTy, declared)
+			}
+		}
+	case *ast.AssignFieldStmt:
+		objTy := c.checkExpr(s.Object)
+		valTy := c.checkExpr(s.Value)
+		if st, ok := objTy.(TStruct); ok {
+			if decl, ok := c.structs[st.Name]; ok {
+				found := false
+				for _, f := range decl.Fields {
+					if f.Name == s.Field {
+						found = true
+						fieldTy := c.resolveTypeName(s.Pos, f.Type)
+						if !sameType(fieldTy, valTy) && !isUnknown(fieldTy) && !isUnknown(valTy) {
+							c.errorAt(s.Pos, "cannot assign %s to field %s of %s", valTy, fieldTy, st.Name)
+						}
+						break
+					}
+				}
+				if !found {
+					c.errorAt(s.Pos, "%s has no field %q", st.Name, s.Field)
+				}
+			}
+		} else if !isUnknown(objTy) {
+			c.errorAt(s.Pos, "cannot access field of non-struct %s", objTy)
+		}
+	case *ast.AssignIndexStmt:
+		listTy := c.checkExpr(s.List)
+		idxTy := c.checkExpr(s.Index)
+		valTy := c.checkExpr(s.Value)
+		
+		if !sameType(idxTy, TInt{}) && !isUnknown(idxTy) {
+			c.errorAt(s.Pos, "index must be int, got %s", idxTy)
+		}
+		
+		if l, ok := listTy.(TList); ok {
+			if !sameType(l.Elem, valTy) && !isUnknown(l.Elem) && !isUnknown(valTy) {
+				c.errorAt(s.Pos, "cannot assign %s to list of %s", valTy, l.Elem)
+			}
+		} else if !isUnknown(listTy) {
+			c.errorAt(s.Pos, "cannot index non-list type %s", listTy)
+		}
 	case *ast.ExprStmt:
 		c.checkExpr(s.Expr)
 	case *ast.SpawnStmt:
@@ -506,6 +574,8 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		}
 	case *ast.FnStmt:
 		c.checkFnDecl(s)
+	case *ast.ExternFnStmt:
+		// Already registered in pass 2, nothing to check body-wise
 	case *ast.StructDecl:
 		// Nothing to check — struct fields are just names
 	case *ast.EnumDecl:
@@ -528,6 +598,8 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				c.errorAt(s.Pos, "while condition must be bool, got %s", condT)
 			}
 		}
+		c.checkBlock(s.Body)
+	case *ast.ArenaStmt:
 		c.checkBlock(s.Body)
 	case *ast.ReturnStmt:
 		var retType Type = TUnit{}
@@ -966,6 +1038,20 @@ func (c *checker) checkCall(e *ast.CallExpr) Type {
 			}
 		}
 		return TStream{Elem: elemType}
+	} else if id.Name == "vec_add" || id.Name == "vec_mul" {
+		if len(e.Args) != 2 {
+			c.errorAt(e.Pos, "%s takes exactly 2 arguments", id.Name)
+			return TVec256{Elem: TUnknown{}}
+		}
+		arg0T := c.checkExpr(e.Args[0])
+		arg1T := c.checkExpr(e.Args[1])
+		if !sameType(arg0T, arg1T) && !isUnknown(arg0T) && !isUnknown(arg1T) {
+			c.errorAt(e.Pos, "%s arguments must have the same type, got %s and %s", id.Name, arg0T, arg1T)
+		}
+		if _, ok := arg0T.(TVec256); !ok && !isUnknown(arg0T) {
+			c.errorAt(e.Pos, "%s arguments must be vec256 types, got %s", id.Name, arg0T)
+		}
+		return arg0T
 	}
 
 	calleeT, ok := c.env.get(id.Name)
@@ -1028,6 +1114,13 @@ func unify(param, arg Type, subst map[string]Type) bool {
 		}
 		return true
 	}
+	if pVec, pOk := param.(TVec256); pOk {
+		aVec, aOk := arg.(TVec256)
+		if !aOk {
+			return false
+		}
+		return unify(pVec.Elem, aVec.Elem, subst)
+	}
 	return sameType(param, arg) || isUnknown(param) || isUnknown(arg)
 }
 
@@ -1057,6 +1150,9 @@ func substitute(t Type, subst map[string]Type) Type {
 	}
 	if stream, ok := t.(TStream); ok {
 		return TStream{Elem: substitute(stream.Elem, subst)}
+	}
+	if vec, ok := t.(TVec256); ok {
+		return TVec256{Elem: substitute(vec.Elem, subst)}
 	}
 	if chanTy, ok := t.(TChan); ok {
 		return TChan{Elem: substitute(chanTy.Elem, subst)}
@@ -1119,6 +1215,9 @@ func (c *checker) resolveTypeName(pos ast.Position, name string) Type {
 		if baseName == "Result" && len(typeArgs) == 1 {
 			return TResult{Elem: typeArgs[0]}
 		}
+		if baseName == "vec256" && len(typeArgs) == 1 {
+			return TVec256{Elem: typeArgs[0]}
+		}
 		return TInstantiated{
 			Base: baseType,
 			Args: typeArgs,
@@ -1142,11 +1241,21 @@ func (c *checker) resolveTypeName(pos ast.Position, name string) Type {
 		return TList{Elem: TUnknown{}}
 	case "stream":
 		return TStream{Elem: TUnknown{}}
+	case "vec256":
+		return TVec256{Elem: TUnknown{}}
 	case "chan":
 		return TChan{Elem: TUnknown{}}
 	case "fn":
 		return TFun{}
 	}
+
+	// Parse u4, u12, etc. bit-width types
+	if strings.HasPrefix(name, "u") {
+		if bits, err := strconv.Atoi(name[1:]); err == nil && bits > 0 {
+			return TUint{Bits: bits}
+		}
+	}
+
 	// Might be a struct type
 	if _, ok := c.structs[name]; ok {
 		return TStruct{Name: name}
@@ -1173,7 +1282,7 @@ func (c *checker) resolveTypeExpr(e ast.Expr) Type {
 
 func isNumeric(t Type) bool {
 	switch t.(type) {
-	case TInt, TFloat:
+	case TInt, TFloat, TUint:
 		return true
 	}
 	return false
@@ -1192,6 +1301,9 @@ func sameType(a, b Type) bool {
 	case TInt:
 		_, ok := b.(TInt)
 		return ok
+	case TUint:
+		bu, ok := b.(TUint)
+		return ok && a.Bits == bu.Bits
 	case TFloat:
 		_, ok := b.(TFloat)
 		return ok
@@ -1215,6 +1327,15 @@ func sameType(a, b Type) bool {
 		return sameType(a.Elem, bt.Elem)
 	case TStream:
 		bt, ok := b.(TStream)
+		if !ok {
+			return false
+		}
+		if a.Elem == nil || bt.Elem == nil {
+			return true
+		}
+		return sameType(a.Elem, bt.Elem)
+	case TVec256:
+		bt, ok := b.(TVec256)
 		if !ok {
 			return false
 		}

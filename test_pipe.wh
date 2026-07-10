@@ -1,0 +1,11 @@
+fn main() {
+    let result = [1, 2, 3] 
+        |> map(x => x * 10)
+        |> filter(x => x > 15)
+        |> collect();
+    
+    print("Stream First Element: ", result[0]);
+    print("Stream Second Element: ", result[1]);
+}
+
+main();

@@ -1,199 +1,162 @@
-// Package lsp implements the Whale Language Server.
-// It speaks LSP over stdio (JSON-RPC 2.0 with Content-Length framing).
 package lsp
 
 import (
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
 	"os"
+	"sync"
 )
 
-// Server is the Whale Language Server.
+// Serve runs the LSP server on os.Stdin / os.Stdout.
+func Serve() {
+	transport := NewTransport(os.Stdin, os.Stdout)
+	s := &Server{
+		transport: transport,
+		documents: make(map[string]documentState),
+	}
+	s.Run()
+}
+
 type Server struct {
 	transport *Transport
-	docs      map[string]documentState // URI -> latest analysis
-	logger    *log.Logger
+	mu        sync.Mutex
+	documents map[string]documentState
 }
 
-// NewServer creates a Server reading from r and writing to w.
-func NewServer(r io.Reader, w io.Writer) *Server {
-	return &Server{
-		transport: NewTransport(r, w),
-		docs:      map[string]documentState{},
-		logger:    log.New(os.Stderr, "[whale-lsp] ", log.LstdFlags),
-	}
-}
-
-// Run starts the main event loop, reading messages until EOF.
-func (s *Server) Run() error {
+func (s *Server) Run() {
 	for {
 		msg, err := s.transport.ReadMessage()
-		if err == io.EOF {
-			return nil
-		}
 		if err != nil {
-			return fmt.Errorf("read: %w", err)
+			if err.Error() == "EOF" {
+				return
+			}
+			continue
 		}
-		s.logger.Printf("→ %s", msg.Method)
-		if err := s.dispatch(msg); err != nil {
-			s.logger.Printf("dispatch error: %v", err)
-		}
+		s.handle(msg)
 	}
 }
 
-// dispatch routes an incoming JSON-RPC message to the appropriate handler.
-func (s *Server) dispatch(msg *Message) error {
+func (s *Server) handle(msg *Message) {
 	switch msg.Method {
 	case "initialize":
-		return s.handleInitialize(msg)
+		var params InitializeParams
+		json.Unmarshal(msg.Params, &params)
+		
+		res := InitializeResult{
+			Capabilities: ServerCapabilities{
+				TextDocumentSync:           1, // Full
+				DocumentFormattingProvider: true,
+				HoverProvider:              true,
+				CompletionProvider:         &CompletionOptions{TriggerCharacters: []string{"."}},
+				DiagnosticProvider:         &DiagnosticOptions{},
+			},
+			ServerInfo: ServerInfo{
+				Name:    "wh-lsp",
+				Version: "0.1.0",
+			},
+		}
+		s.transport.WriteMessage(&Message{
+			ID:     msg.ID,
+			Result: res,
+		})
+
 	case "initialized":
-		return nil // notification, no response needed
-	case "shutdown":
-		return s.reply(msg, nil)
-	case "exit":
-		os.Exit(0)
+		// Do nothing
+
 	case "textDocument/didOpen":
-		return s.handleDidOpen(msg)
+		var params DidOpenTextDocumentParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			s.updateDoc(params.TextDocument.URI, params.TextDocument.Text)
+		}
+
 	case "textDocument/didChange":
-		return s.handleDidChange(msg)
-	case "textDocument/didClose":
-		return nil
+		var params DidChangeTextDocumentParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			if len(params.ContentChanges) > 0 {
+				s.updateDoc(params.TextDocument.URI, params.ContentChanges[0].Text)
+			}
+		}
+
 	case "textDocument/hover":
-		return s.handleHover(msg)
+		var params HoverParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			s.mu.Lock()
+			state, ok := s.documents[params.TextDocument.URI]
+			s.mu.Unlock()
+
+			if ok {
+				info := hoverType(state, params.Position.Line, params.Position.Character)
+				if info != "" {
+					s.transport.WriteMessage(&Message{
+						ID: msg.ID,
+						Result: HoverResult{
+							Contents: MarkupContent{
+								Kind:  "markdown",
+								Value: info,
+							},
+						},
+					})
+					return
+				}
+			}
+			
+			// Send null result if no hover info
+			s.transport.WriteMessage(&Message{
+				ID:     msg.ID,
+				Result: nil,
+			})
+		}
+
 	case "textDocument/completion":
-		return s.handleCompletion(msg)
+		var params CompletionParams
+		if err := json.Unmarshal(msg.Params, &params); err == nil {
+			s.mu.Lock()
+			state, ok := s.documents[params.TextDocument.URI]
+			s.mu.Unlock()
+
+			if ok {
+				items := completionItems(state, params.Position.Line, params.Position.Character)
+				s.transport.WriteMessage(&Message{
+					ID: msg.ID,
+					Result: CompletionList{
+						IsIncomplete: false,
+						Items:        items,
+					},
+				})
+				return
+			}
+
+			s.transport.WriteMessage(&Message{
+				ID: msg.ID,
+				Result: nil,
+			})
+		}
+
 	default:
-		// Unknown method — return method not found
+		// Method not found
 		if msg.ID != nil {
-			return s.replyError(msg, -32601, fmt.Sprintf("method not found: %s", msg.Method))
+			s.transport.WriteMessage(&Message{
+				ID: msg.ID,
+				Error: &RPCError{
+					Code:    -32601,
+					Message: fmt.Sprintf("Method not found: %s", msg.Method),
+				},
+			})
 		}
 	}
-	return nil
 }
 
-// ============================================================================
-// Handlers
-// ============================================================================
-
-func (s *Server) handleInitialize(msg *Message) error {
-	result := InitializeResult{
-		ServerInfo: ServerInfo{Name: "whale-lsp", Version: "0.1.0"},
-		Capabilities: ServerCapabilities{
-			TextDocumentSync: 1, // Full sync
-			HoverProvider:    true,
-			CompletionProvider: &CompletionOptions{
-				TriggerCharacters: []string{".", "("},
-			},
-		},
-	}
-	return s.reply(msg, result)
-}
-
-func (s *Server) handleDidOpen(msg *Message) error {
-	params, err := unmarshalParams[DidOpenTextDocumentParams](msg.Params)
-	if err != nil {
-		return err
-	}
-	state := analyze(params.TextDocument.Text)
-	s.docs[params.TextDocument.URI] = state
-	s.logger.Printf("opened %s, %d errors", params.TextDocument.URI, len(state.typeResult.Errors)+len(state.parseErrors))
-	return s.pushDiagnostics(params.TextDocument.URI, state)
-}
-
-func (s *Server) handleDidChange(msg *Message) error {
-	params, err := unmarshalParams[DidChangeTextDocumentParams](msg.Params)
-	if err != nil {
-		return err
-	}
-	if len(params.ContentChanges) == 0 {
-		return nil
-	}
-	text := params.ContentChanges[len(params.ContentChanges)-1].Text
+func (s *Server) updateDoc(uri, text string) {
 	state := analyze(text)
-	s.docs[params.TextDocument.URI] = state
-	return s.pushDiagnostics(params.TextDocument.URI, state)
-}
+	
+	s.mu.Lock()
+	s.documents[uri] = state
+	s.mu.Unlock()
 
-func (s *Server) handleHover(msg *Message) error {
-	params, err := unmarshalParams[HoverParams](msg.Params)
-	if err != nil {
-		return err
-	}
-	state, ok := s.docs[params.TextDocument.URI]
-	if !ok {
-		return s.reply(msg, nil)
-	}
-
-	text := hoverType(state, params.Position.Line, params.Position.Character)
-	if text == "" {
-		return s.reply(msg, nil)
-	}
-	return s.reply(msg, HoverResult{
-		Contents: MarkupContent{Kind: "markdown", Value: text},
-	})
-}
-
-func (s *Server) handleCompletion(msg *Message) error {
-	params, err := unmarshalParams[CompletionParams](msg.Params)
-	if err != nil {
-		return err
-	}
-	state, ok := s.docs[params.TextDocument.URI]
-	if !ok {
-		state = documentState{}
-	}
-
-	items := completionItems(state, params.Position.Line, params.Position.Character)
-	list := CompletionList{IsIncomplete: false, Items: items}
-	return s.reply(msg, list)
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-// pushDiagnostics sends a textDocument/publishDiagnostics notification.
-func (s *Server) pushDiagnostics(uri string, state documentState) error {
 	diags := diagnosticsFor(state)
-	if diags == nil {
-		diags = []Diagnostic{} // must be an array, not null
-	}
-	return s.transport.WriteNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{
+	
+	s.transport.WriteNotification("textDocument/publishDiagnostics", PublishDiagnosticsParams{
 		URI:         uri,
 		Diagnostics: diags,
-	})
-}
-
-// reply sends a JSON-RPC success response.
-func (s *Server) reply(req *Message, result interface{}) error {
-	if req.ID == nil {
-		return nil // notification — no reply
-	}
-	var raw json.RawMessage
-	if result != nil {
-		data, err := json.Marshal(result)
-		if err != nil {
-			return err
-		}
-		raw = json.RawMessage(data)
-	} else {
-		raw = json.RawMessage("null")
-	}
-	return s.transport.WriteMessage(&Message{
-		ID:     req.ID,
-		Result: &raw,
-	})
-}
-
-// replyError sends a JSON-RPC error response.
-func (s *Server) replyError(req *Message, code int, msg string) error {
-	if req.ID == nil {
-		return nil
-	}
-	return s.transport.WriteMessage(&Message{
-		ID:    req.ID,
-		Error: &RPCError{Code: code, Message: msg},
 	})
 }

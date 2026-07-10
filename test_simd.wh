@@ -1,0 +1,9 @@
+fn test_simd(a: vec256<int>, b: vec256<int>) -> vec256<int> {
+    return vec_add(a, b);
+}
+
+fn main() {
+    print("SIMD Compiled successfully");
+}
+
+main();

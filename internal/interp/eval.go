@@ -434,6 +434,8 @@ func (i *Interpreter) evalStmt(s ast.Stmt) {
 		i.evalIf(s)
 	case *ast.WhileStmt:
 		i.evalWhile(s)
+	case *ast.ArenaStmt:
+		i.evalBlock(s.Body)
 	case *ast.ForStmt:
 		i.evalFor(s)
 	case *ast.ReturnStmt:
