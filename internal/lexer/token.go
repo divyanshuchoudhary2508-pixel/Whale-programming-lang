@@ -79,6 +79,8 @@ const (
 	TOKEN_ARENA
 	TOKEN_PACKED
 	TOKEN_EXTERN
+	TOKEN_TRAIT
+	TOKEN_IMPL
 )
 
 // keywords maps reserved identifier strings to their token types.
@@ -110,6 +112,8 @@ var keywords = map[string]TokenType{
 	"arena":  TOKEN_ARENA,
 	"packed": TOKEN_PACKED,
 	"extern": TOKEN_EXTERN,
+	"trait":  TOKEN_TRAIT,
+	"impl":   TOKEN_IMPL,
 }
 
 // String returns a human-readable name for the token type.
@@ -243,6 +247,10 @@ func (t TokenType) String() string {
 		return "packed"
 	case TOKEN_EXTERN:
 		return "extern"
+	case TOKEN_TRAIT:
+		return "trait"
+	case TOKEN_IMPL:
+		return "impl"
 	default:
 		return "UNKNOWN"
 	}

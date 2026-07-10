@@ -148,6 +148,10 @@ func (p *parser) parseStatement() ast.Stmt {
 		return p.parseStructDecl()
 	case lexer.TOKEN_ENUM:
 		return p.parseEnumDecl()
+	case lexer.TOKEN_TRAIT:
+		return p.parseTraitDecl()
+	case lexer.TOKEN_IMPL:
+		return p.parseImplDecl()
 	case lexer.TOKEN_IMPORT:
 		return p.parseImport()
 	case lexer.TOKEN_EXTERN:
@@ -426,7 +430,13 @@ func (p *parser) parseFnDecl() ast.Stmt {
 		returnType = p.parseTypeString()
 	}
 
-	body := p.parseBlock()
+	var body *ast.BlockStmt
+	if p.current().Type == lexer.TOKEN_SEMI {
+		p.advance() // consume ';'
+	} else {
+		body = p.parseBlock()
+	}
+
 	return &ast.FnStmt{
 		Pos:        pos,
 		Name:       name,
@@ -519,19 +529,103 @@ func (p *parser) parseStructDecl() ast.Stmt {
 		}
 		fname := p.advance().Literal
 		p.expect(lexer.TOKEN_COLON, "':'")
-		ftype := ""
-		if p.current().Type == lexer.TOKEN_IDENT {
-			ftype = p.parseTypeString()
-		} else {
-			p.errorAt(p.current(), "expected field type")
-		}
+		ftype := p.parseTypeString()
 		fields = append(fields, ast.Param{Name: fname, Type: ftype})
+		
 		if p.current().Type == lexer.TOKEN_COMMA {
-			p.advance() // consume ','
+			p.advance()
+		} else {
+			break
 		}
 	}
 	p.expect(lexer.TOKEN_RBRACE, "'}'")
-	return &ast.StructDecl{Pos: pos, Name: name, TypeParams: typeParams, Fields: fields, Packed: isPacked}
+	
+	return &ast.StructDecl{
+		Pos:        pos,
+		Name:       name,
+		TypeParams: typeParams,
+		Fields:     fields,
+		Packed:     isPacked,
+	}
+}
+
+func (p *parser) parseTraitDecl() ast.Stmt {
+	pos := tokPos(p.advance()) // consume 'trait'
+	if p.current().Type != lexer.TOKEN_IDENT {
+		p.errorAt(p.current(), "expected trait name after 'trait'")
+		return nil
+	}
+	name := p.advance().Literal
+	p.expect(lexer.TOKEN_LBRACE, "'{'")
+	
+	methods := make([]*ast.FnStmt, 0)
+	for p.current().Type != lexer.TOKEN_RBRACE && p.current().Type != lexer.TOKEN_EOF {
+		if p.current().Type == lexer.TOKEN_FN {
+			stmt := p.parseFnDecl()
+			if fnStmt, ok := stmt.(*ast.FnStmt); ok {
+				methods = append(methods, fnStmt)
+			}
+		} else {
+			p.errorAt(p.current(), "expected method declaration")
+			p.advance()
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACE, "'}'")
+	
+	return &ast.TraitDecl{
+		Pos:     pos,
+		Name:    name,
+		Methods: methods,
+	}
+}
+
+func (p *parser) parseImplDecl() ast.Stmt {
+	pos := tokPos(p.advance()) // consume 'impl'
+	if p.current().Type != lexer.TOKEN_IDENT {
+		p.errorAt(p.current(), "expected trait name after 'impl'")
+		return nil
+	}
+	traitName := p.advance().Literal
+	
+	var structName string
+	if p.current().Type == lexer.TOKEN_FOR {
+		p.advance() // consume 'for'
+		if p.current().Type != lexer.TOKEN_IDENT {
+			p.errorAt(p.current(), "expected struct name after 'for'")
+			return nil
+		}
+		structName = p.advance().Literal
+	} else {
+		// Just implementing methods for a struct without a trait
+		structName = traitName
+		traitName = ""
+	}
+	
+	p.expect(lexer.TOKEN_LBRACE, "'{'")
+	
+	methods := make([]*ast.FnStmt, 0)
+	for p.current().Type != lexer.TOKEN_RBRACE && p.current().Type != lexer.TOKEN_EOF {
+		if p.current().Type == lexer.TOKEN_PUB {
+			p.advance() // consume 'pub', ignore it for impl methods for now
+		}
+		if p.current().Type == lexer.TOKEN_FN {
+			stmt := p.parseFnDecl()
+			if fnStmt, ok := stmt.(*ast.FnStmt); ok {
+				methods = append(methods, fnStmt)
+			}
+		} else {
+			p.errorAt(p.current(), "expected method declaration")
+			p.advance()
+		}
+	}
+	p.expect(lexer.TOKEN_RBRACE, "'}'")
+	
+	return &ast.ImplDecl{
+		Pos:        pos,
+		TraitName:  traitName,
+		StructName: structName,
+		Methods:    methods,
+	}
 }
 
 func (p *parser) parseEnumDecl() *ast.EnumDecl {

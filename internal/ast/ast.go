@@ -270,16 +270,66 @@ func (s *ChanSendStmt) String() string {
 }
 
 // Param is a function parameter: name and optional type annotation.
+type FieldDecl struct {
+	Name string
+	Type string
+}
+
+// TraitDecl is a trait (interface) declaration.
+//
+//	trait Stringer { fn to_string(self) -> string; }
+type TraitDecl struct {
+	Pos      Position
+	IsPublic bool
+	Name     string
+	Methods  []*FnStmt
+}
+
+func (s *TraitDecl) nodeMarker() {}
+func (s *TraitDecl) stmtMarker() {}
+func (s *TraitDecl) String() string {
+	out := "trait " + s.Name + " {\n"
+	for _, m := range s.Methods {
+		out += "  " + m.String() + "\n"
+	}
+	out += "}"
+	return out
+}
+
+// ImplDecl is an implementation of a trait for a struct.
+//
+//	impl Stringer for MyStruct { ... }
+type ImplDecl struct {
+	Pos        Position
+	IsPublic   bool
+	TraitName  string
+	StructName string
+	Methods    []*FnStmt
+}
+
+func (s *ImplDecl) nodeMarker() {}
+func (s *ImplDecl) stmtMarker() {}
+func (s *ImplDecl) String() string {
+	out := "impl " + s.TraitName + " for " + s.StructName + " {\n"
+	for _, m := range s.Methods {
+		out += "  " + m.String() + "\n"
+	}
+	out += "}"
+	return out
+}
+
+// Param is a function parameter: name and optional type annotation.
 type Param struct {
 	Name string
 	Type string
 }
 
-// FnStmt is a top-level function declaration.
+// FnDecl is a top-level function declaration.
 //
 //	fn add(a: int, b: int) -> int { return a + b; }
 type FnStmt struct {
 	Pos        Position
+	IsPublic   bool
 	Name       string
 	TypeParams []string
 	Params     []Param
@@ -308,7 +358,11 @@ func (s *FnStmt) String() string {
 	if s.ReturnType != "" {
 		out += " -> " + s.ReturnType
 	}
-	out += " " + s.Body.String()
+	if s.Body != nil {
+		out += " " + s.Body.String()
+	} else {
+		out += ";"
+	}
 	return out
 }
 
@@ -347,6 +401,7 @@ func (s *ExternFnStmt) String() string {
 //	struct Point { x: int, y: int }
 type StructDecl struct {
 	Pos        Position
+	IsPublic   bool
 	Name       string
 	TypeParams []string
 	Fields     []Param

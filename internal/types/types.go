@@ -225,6 +225,12 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 			c.structs[s.Name] = s
 		case *ast.EnumDecl:
 			c.enums[s.Name] = s
+		case *ast.TraitDecl:
+			// Basic trait registration stub
+			// Trait checking (e.g. methods exist) would happen here
+		case *ast.ImplDecl:
+			// Basic impl checking stub
+			// Verify structName implements methods of traitName
 		case *ast.FnStmt:
 			c.funcs[s.Name] = s
 		case *ast.ExternFnStmt:

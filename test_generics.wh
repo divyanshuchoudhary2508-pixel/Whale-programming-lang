@@ -1,17 +1,25 @@
-enum Result<T, E> {
-    Ok(T),
-    Err(E)
+// test_generics.wh
+pub struct List<T> {
+    data: int,
+    len: int,
 }
 
-fn identity<T>(x: T) -> T {
-    return x;
+pub fn identity<T>(value: int) -> int {
+    return value;
 }
 
-let a = identity(5);
-let b = identity("hello");
+pub trait Stringer {
+    fn to_string() -> string;
+}
 
-let success: Result<int, string> = Ok(10);
-let failure: Result<int, string> = Err("error");
+pub impl Stringer for List {
+    fn to_string() -> string {
+        return "List";
+    }
+}
 
-print(a);
-print(b);
+fn main() {
+    print("Parsing generics test");
+}
+
+main();
