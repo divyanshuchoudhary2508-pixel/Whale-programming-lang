@@ -229,8 +229,11 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 			// Basic trait registration stub
 			// Trait checking (e.g. methods exist) would happen here
 		case *ast.ImplDecl:
-			// Basic impl checking stub
-			// Verify structName implements methods of traitName
+			for _, method := range s.Methods {
+				// Mangle method name
+				methodName := s.StructName + "_" + method.Name
+				c.funcs[methodName] = method
+			}
 		case *ast.FnStmt:
 			c.funcs[s.Name] = s
 		case *ast.ExternFnStmt:
@@ -304,6 +307,12 @@ func builtinScope() *Scope {
 	s.define("read_file", TFun{Params: []Type{TString{}}, Ret: TResult{Elem: TString{}}})
 	s.define("write_file", TFun{Params: []Type{TString{}, TString{}}, Ret: TResult{Elem: TInt{}}})
 	s.define("make_chan", TFun{Ret: TChan{Elem: TUnknown{}}})
+	s.define("net_listen", TFun{Params: []Type{TInt{}}, Ret: TResult{Elem: TInt{}}})
+	s.define("net_accept", TFun{Params: []Type{TInt{}}, Ret: TResult{Elem: TInt{}}})
+	s.define("net_recv", TFun{Params: []Type{TInt{}}, Ret: TResult{Elem: TString{}}})
+	s.define("net_send", TFun{Params: []Type{TInt{}, TString{}}, Ret: TResult{Elem: TInt{}}})
+	s.define("net_close", TFun{Params: []Type{TInt{}}, Ret: TResult{Elem: TInt{}}})
+	s.define("net_dial", TFun{Params: []Type{TString{}, TInt{}}, Ret: TResult{Elem: TInt{}}})
 	s.define("lines", TFun{Params: []Type{TString{}}, Ret: TList{Elem: TString{}}})
 	s.define("push", TFun{Params: []Type{TList{Elem: TUnknown{}}, TUnknown{}}, Ret: TList{Elem: TUnknown{}}})
 	s.define("pop", TFun{Params: []Type{TList{Elem: TUnknown{}}}, Ret: TUnknown{}})
@@ -830,7 +839,12 @@ func (c *checker) checkExprInternal(e ast.Expr) Type {
 					return c.resolveTypeName(e.Pos, f.Type)
 				}
 			}
-			c.errorAt(e.Pos, "%s has no field %q", st.Name, e.Field)
+			// If not a field, maybe it's a method!
+			methodName := st.Name + "_" + e.Field
+			if t, ok := c.env.get(methodName); ok {
+				return t
+			}
+			c.errorAt(e.Pos, "struct %s has no field %q", st.Name, e.Field)
 		} else if mod, ok := objT.(TModule); ok {
 			if modScope, exists := c.modules[mod.Name]; exists {
 				if t, ok := modScope.get(e.Field); ok {

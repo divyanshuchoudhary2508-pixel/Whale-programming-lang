@@ -1,0 +1,52 @@
+// test_net.wh
+import "std/net" as tcp;
+
+// Background TCP Server
+fn start_server() -> Result<int> {
+    print("[Server] Starting on port 8080...");
+    let listener = tcp.listen(8080)?;
+    
+    print("[Server] Waiting for connection...");
+    let conn = listener.accept()?;
+    print("[Server] Client connected!");
+    
+    let msg = conn.read()?;
+    print("[Server] Received: " + msg);
+    
+    conn.write("Echo from Whale Server: " + msg)?;
+    conn.close()?;
+    print("[Server] Connection closed.");
+    
+    return error(""); // trick to just exit without needing Ok(0)
+}
+
+fn run_server() {
+    let _ = start_server();
+}
+
+fn client_code() -> Result<int> {
+    print("[Client] Dialing localhost:8080...");
+    let conn = tcp.dial("localhost", 8080)?;
+    
+    print("[Client] Connected! Sending message...");
+    conn.write("Hello, networking world!")?;
+    
+    let response = conn.read()?;
+    print("[Client] Response: " + response);
+    
+    conn.close()?;
+    return error(""); // Just a trick
+}
+
+fn main() {
+    spawn run_server();
+    
+    let mut i = 0;
+    while i < 1000000 {
+        i = i + 1;
+    }
+    
+    let _ = client_code();
+}
+
+main();

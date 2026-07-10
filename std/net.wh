@@ -1,23 +1,47 @@
 // std::net
-// Zero-overhead C-FFI networking bindings for Whale
+// Safe, object-oriented TCP Networking bindings for Whale
 
-extern fn socket(domain: int, type: int, protocol: int) -> int;
-extern fn connect(sockfd: int, addr: int, addrlen: int) -> int;
-extern fn send(sockfd: int, buf: int, len: int, flags: int) -> int;
-extern fn recv(sockfd: int, buf: int, len: int, flags: int) -> int;
-
-pub fn create_socket(domain: int, type: int, protocol: int) -> int {
-    return socket(domain, type, protocol);
+pub struct TcpListener {
+    idx: int,
 }
 
-pub fn connect_socket(sockfd: int, addr: int, addrlen: int) -> int {
-    return connect(sockfd, addr, addrlen);
+pub struct TcpStream {
+    idx: int,
 }
 
-pub fn send_data(sockfd: int, buf: int, len: int, flags: int) -> int {
-    return send(sockfd, buf, len, flags);
+pub impl TcpListener {
+    // Blocks and accepts a new TCP connection
+    pub fn accept(self) -> Result<TcpStream> {
+        let conn_idx = net_accept(self.idx)?;
+        return TcpStream { idx: conn_idx };
+    }
 }
 
-pub fn receive_data(sockfd: int, buf: int, len: int, flags: int) -> int {
-    return recv(sockfd, buf, len, flags);
+pub impl TcpStream {
+    // Reads data from the TCP stream
+    pub fn read(self) -> Result<string> {
+        return net_recv(self.idx);
+    }
+    
+    // Writes data to the TCP stream
+    pub fn write(self, data: string) -> Result<int> {
+        return net_send(self.idx, data);
+    }
+    
+    // Closes the TCP connection safely
+    pub fn close(self) -> Result<int> {
+        return net_close(self.idx);
+    }
+}
+
+// Starts a TCP server listening on the specified port
+pub fn listen(port: int) -> Result<TcpListener> {
+    let idx = net_listen(port)?;
+    return TcpListener { idx: idx };
+}
+
+// Connects to a TCP server at the given host and port
+pub fn dial(host: string, port: int) -> Result<TcpStream> {
+    let idx = net_dial(host, port)?;
+    return TcpStream { idx: idx };
 }

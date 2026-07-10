@@ -99,6 +99,8 @@ func prefixDecl(s ast.Stmt, prefix string) {
 		s.Name = prefix + s.Name
 	case *ast.LetStmt:
 		s.Name = prefix + s.Name
+	case *ast.ImplDecl:
+		s.StructName = prefix + s.StructName
 	}
 }
 
@@ -116,6 +118,8 @@ func rewriteGlobals(file *ast.File, prefix string) {
 			globals[strings.TrimPrefix(s.Name, prefix)] = true
 		case *ast.LetStmt:
 			globals[strings.TrimPrefix(s.Name, prefix)] = true
+		case *ast.ImplDecl:
+			globals[strings.TrimPrefix(s.StructName, prefix)] = true
 		}
 	}
 
@@ -170,6 +174,10 @@ func rewriteGlobals(file *ast.File, prefix string) {
 			walk(n.Body)
 		case *ast.FnStmt:
 			walk(n.Body)
+		case *ast.ImplDecl:
+			for _, method := range n.Methods {
+				walk(method.Body)
+			}
 		case *ast.StructLit:
 			if globals[n.Type] {
 				n.Type = prefix + n.Type
@@ -263,6 +271,10 @@ func rewriteModuleAccesses(file *ast.File, aliases map[string]bool) {
 			walk(n.Body)
 		case *ast.FnStmt:
 			walk(n.Body)
+		case *ast.ImplDecl:
+			for _, method := range n.Methods {
+				walk(method.Body)
+			}
 		case *ast.StructLit:
 			for k := range n.Fields {
 				v := n.Fields[k]

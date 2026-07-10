@@ -19,6 +19,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/whale-lang/whale/internal/ast"
 	"github.com/whale-lang/whale/internal/lexer"
@@ -458,7 +459,10 @@ func (i *Interpreter) evalStmt(s ast.Stmt) {
 	case *ast.ImplDecl:
 		// Evaluate the methods so they exist in the environment (e.g. for module exports)
 		for _, method := range s.Methods {
+			originalName := method.Name
+			method.Name = s.StructName + "_" + method.Name
 			i.evalFnDecl(method)
+			method.Name = originalName
 		}
 	case *ast.BlockStmt:
 		i.evalBlock(s)
@@ -650,11 +654,22 @@ func (i *Interpreter) evalSpawn(s *ast.SpawnStmt) {
 	}
 	
 	go func(c Value, a []Value) {
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Println("SPAWN PANIC:", r)
+			}
+		}()
 		childInterp := &Interpreter{env: i.env, debug: i.debug}
 		if fn, ok := c.(functionValue); ok {
 			childInterp.callFunctionValue(fn, a)
 		} else if nativeFn, ok := c.(nativeFnValue); ok {
 			nativeFn.fn(a)
+		}
+		if len(childInterp.errs) > 0 {
+			fmt.Println("SPAWN ERRORS:")
+			for _, err := range childInterp.errs {
+				fmt.Println(err)
+			}
 		}
 	}(callee, args)
 }
@@ -1124,6 +1139,10 @@ func (i *Interpreter) evalFieldAccess(e *ast.FieldAccess) Value {
 	}
 	fv, ok := sv.fields[e.Field]
 	if !ok {
+		methodName := sv.typeName + "_" + e.Field
+		if mf, exists := i.env.get(methodName); exists {
+			return mf
+		}
 		i.err(e.Pos, fmt.Sprintf("struct %s has no field %q", sv.typeName, e.Field))
 		return nullValue{}
 	}
@@ -1261,6 +1280,26 @@ func (i *Interpreter) evalCall(e *ast.CallExpr) Value {
 			return i.callTake(e)
 		case "skip":
 			return i.callSkip(e)
+		}
+	}
+
+	// Fast path for method calls
+	if fa, ok := e.Callee.(*ast.FieldAccess); ok {
+		obj := i.evalExpr(fa.Expr)
+		if sv, ok := obj.(structValue); ok {
+			if _, exists := sv.fields[fa.Field]; !exists {
+				methodName := sv.typeName + "_" + fa.Field
+				if mf, exists := i.env.get(methodName); exists {
+					if fn, ok := mf.(functionValue); ok {
+						args := make([]Value, len(e.Args)+1)
+						args[0] = sv
+						for idx, a := range e.Args {
+							args[idx+1] = i.evalExpr(a)
+						}
+						return i.callFunctionValue(fn, args)
+					}
+				}
+			}
 		}
 	}
 
@@ -2082,59 +2121,106 @@ func (i *Interpreter) callParseInt(e *ast.CallExpr) Value {
 var nativeListeners []net.Listener
 var nativeConns []net.Conn
 var nativeMaps []map[string]string
+var netMutex sync.Mutex
 
 func (i *Interpreter) callNetListen(e *ast.CallExpr) Value {
 	port := i.evalExpr(e.Args[0]).(intValue).v
 	l, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
-		return intValue{v: -1}
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}}
 	}
+	netMutex.Lock()
 	nativeListeners = append(nativeListeners, l)
-	return intValue{v: int64(len(nativeListeners) - 1)}
+	idx := len(nativeListeners) - 1
+	netMutex.Unlock()
+	return enumValue{Variant: "Ok", Payload: intValue{v: int64(idx)}}
 }
 
 func (i *Interpreter) callNetAccept(e *ast.CallExpr) Value {
 	idx := i.evalExpr(e.Args[0]).(intValue).v
-	if idx < 0 || idx >= int64(len(nativeListeners)) { return intValue{v: -1} }
-	conn, err := nativeListeners[idx].Accept()
-	if err != nil { return intValue{v: -1} }
+	netMutex.Lock()
+	if idx < 0 || idx >= int64(len(nativeListeners)) { 
+		netMutex.Unlock()
+		return enumValue{Variant: "Err", Payload: stringValue{v: "invalid listener index"}} 
+	}
+	listener := nativeListeners[idx]
+	netMutex.Unlock()
+	
+	conn, err := listener.Accept()
+	if err != nil { 
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}} 
+	}
+	
+	netMutex.Lock()
 	nativeConns = append(nativeConns, conn)
-	return intValue{v: int64(len(nativeConns) - 1)}
+	connIdx := len(nativeConns) - 1
+	netMutex.Unlock()
+	
+	return enumValue{Variant: "Ok", Payload: intValue{v: int64(connIdx)}}
 }
 
 func (i *Interpreter) callNetRecv(e *ast.CallExpr) Value {
 	idx := i.evalExpr(e.Args[0]).(intValue).v
-	if idx < 0 || idx >= int64(len(nativeConns)) { return stringValue{v: ""} }
+	netMutex.Lock()
+	if idx < 0 || idx >= int64(len(nativeConns)) { 
+		netMutex.Unlock()
+		return enumValue{Variant: "Err", Payload: stringValue{v: "invalid conn index"}} 
+	}
+	conn := nativeConns[idx]
+	netMutex.Unlock()
+	
 	buf := make([]byte, 4096)
-	n, err := nativeConns[idx].Read(buf)
-	if err != nil || n == 0 { return stringValue{v: ""} }
-	return stringValue{v: string(buf[:n])}
+	n, err := conn.Read(buf)
+	if err != nil { return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}} }
+	if n == 0 { return enumValue{Variant: "Err", Payload: stringValue{v: "EOF"}} }
+	return enumValue{Variant: "Ok", Payload: stringValue{v: string(buf[:n])}}
 }
 
 func (i *Interpreter) callNetSend(e *ast.CallExpr) Value {
 	idx := i.evalExpr(e.Args[0]).(intValue).v
 	data := i.evalExpr(e.Args[1]).(stringValue).v
-	if idx >= 0 && idx < int64(len(nativeConns)) {
-		nativeConns[idx].Write([]byte(data))
+	netMutex.Lock()
+	if idx < 0 || idx >= int64(len(nativeConns)) { 
+		netMutex.Unlock()
+		return enumValue{Variant: "Err", Payload: stringValue{v: "invalid conn index"}} 
 	}
-	return nullValue{}
+	conn := nativeConns[idx]
+	netMutex.Unlock()
+	
+	n, err := conn.Write([]byte(data))
+	if err != nil { return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}} }
+	return enumValue{Variant: "Ok", Payload: intValue{v: int64(n)}}
 }
 
 func (i *Interpreter) callNetClose(e *ast.CallExpr) Value {
 	idx := i.evalExpr(e.Args[0]).(intValue).v
-	if idx >= 0 && idx < int64(len(nativeConns)) {
-		nativeConns[idx].Close()
+	netMutex.Lock()
+	if idx < 0 || idx >= int64(len(nativeConns)) { 
+		netMutex.Unlock()
+		return enumValue{Variant: "Err", Payload: stringValue{v: "invalid conn index"}} 
 	}
-	return nullValue{}
+	conn := nativeConns[idx]
+	netMutex.Unlock()
+	
+	err := conn.Close()
+	if err != nil { return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}} }
+	return enumValue{Variant: "Ok", Payload: intValue{v: 0}}
 }
 
 func (i *Interpreter) callNetDial(e *ast.CallExpr) Value {
 	host := i.evalExpr(e.Args[0]).(stringValue).v
 	port := i.evalExpr(e.Args[1]).(intValue).v
 	conn, err := net.Dial("tcp", fmt.Sprintf("%s:%d", host, port))
-	if err != nil { return intValue{v: -1} }
+	if err != nil { 
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}} 
+	}
+	
+	netMutex.Lock()
 	nativeConns = append(nativeConns, conn)
-	return intValue{v: int64(len(nativeConns) - 1)}
+	connIdx := len(nativeConns) - 1
+	netMutex.Unlock()
+	
+	return enumValue{Variant: "Ok", Payload: intValue{v: int64(connIdx)}}
 }
 
 func (i *Interpreter) callMapNew(e *ast.CallExpr) Value {
