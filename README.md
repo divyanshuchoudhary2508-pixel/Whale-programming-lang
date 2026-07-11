@@ -1,52 +1,70 @@
-# 🐋 Whale v1.0
+<div align="center">
+  <!-- To display your uploaded image, save it to your repository as 'assets/whale.png' and it will appear here! -->
+  <img src="assets/whale.png" alt="Whale Programming Language" width="400" />
+</div>
 
-> **The Shield of Rust. The Engine of Go. The Scalpel of Zig.**
+# 🐳 Whale v1.0
 
-Whale is a modern, statically-typed systems programming language designed from the ground up to offer uncompromising speed, safety, and expressiveness. It features a lightning-fast tree-walking interpreter for rapid development and a native LLVM backend for blazing-fast machine code execution.
+> **The Shield of Rust. The Engine of Go. The Flexibility of Python.**
 
-## 🌟 Key Features
+Whale is a modern, statically-typed systems programming language designed from the ground up to offer uncompromising speed, safety, and expressiveness. It features a lightning-fast tree-walking interpreter for rapid development, and a **native Transpiler** (Whale-to-Go) for blazing-fast native machine code execution (up to 92x faster than the interpreter).
 
-* **Two Execution Engines**: Run your code instantly using the `wh` Interpreter, or compile it to highly optimized native binaries via the **LLVM Backend**.
+## ✨ Key Features
+
+* **Two Execution Engines**: Run your code instantly using the `wh run` Interpreter, or compile it to highly optimized native binaries via the new `wh build` Transpiler.
 * **The "Shield of Rust"**: 
   * A robust, traceable Error Handling system with `Result<T, E>` types and the elegant `?` operator.
-  * A custom-built, conservative Mark-and-Sweep Garbage Collector ensuring memory safety without manual management.
+  * No silent crashes—handle errors explicitly through pattern matching or propagate them cleanly.
 * **The "Engine of Go"**: First-class concurrency built directly into the language via the `spawn` keyword, coupled with asynchronous Channels (`make_chan`, `<-`) for seamless thread communication.
-* **The "Scalpel of Zig"**: Powerful compile-time meta-programming using `comptime`, allowing you to execute logic during the compilation phase for ultimate runtime performance.
-* **Zero-Cost Module System**: A clever AST-mangling module system that allows you to cleanly encapsulate logic into files without the overhead of complex external linkers. LLVM applies cross-module inlining effortlessly!
-* **Standard Library**: Native C and Go bindings for cross-platform TCP Sockets, File I/O, and $O(1)$ HashMaps out of the box.
+* **Zero-Cost Module System**: A clever AST-driven module system that allows you to cleanly encapsulate logic into files without configuration overhead.
+* **Standard Library**: Native networking (`std/net`) for TCP Sockets, File I/O (`std/fs`), built-in JSON and CSV parsing (`std/json`), and $O(1)$ HashMaps out of the box. You can build Concurrent Web Servers natively in Whale!
+* **Built-in Tooling**: Comes with a built-in formatter (`wh fmt`) and testing framework (`wh test`) out of the box.
 
 ---
 
 ## 🚀 Getting Started
 
 ### Prerequisites
-To build the compiler, you need **Go** installed on your system.
-To compile Whale code natively using the LLVM backend, you need **Clang** installed and accessible in your system's PATH.
+To use Whale and compile your projects, you need **Go** installed on your system.
 
-### Building the Compiler
+### Installation
 Clone the repository and build the CLI:
 ```bash
 git clone https://github.com/yourusername/whale.git
 cd whale
-go build -o wh ./cmd/wh
+go build -o wh.exe ./cmd/wh
 ```
+*(Tip: Add the directory containing `wh.exe` to your system's PATH for easy access!)*
 
 ### Usage
-Run code interactively using the Interpreter:
+
+**1. Run code interactively using the Interpreter (Great for rapid prototyping):**
 ```bash
-./wh run my_script.wh
+wh run my_script.wh
 ```
 
-Compile and run code natively using the LLVM Backend:
+**2. Compile code to a highly optimized native binary (Great for production):**
 ```bash
-./wh run --llvm my_script.wh
+wh build my_script.wh
+# This will output my_script.exe (or my_script on Linux/macOS)
+./my_script.exe
+```
+
+**3. Format your code:**
+```bash
+wh fmt my_script.wh
+```
+
+**4. Run tests:**
+```bash
+wh test
 ```
 
 ---
 
-## 💻 Language Tour
+## 📖 Language Tour
 
-### Hello World & Variables
+### Hello World
 ```rust
 fn main() {
     let name = "Whale";
@@ -56,19 +74,22 @@ fn main() {
 ```
 
 ### Error Handling (The Shield)
-No more silent crashes. Whale uses robust `Result` types.
+No more silent crashes. Whale uses robust `Result` types and pattern matching.
 ```rust
-fn divide(a: int, b: int) -> int! {
-    if b == 0 {
-        return error("Cannot divide by zero");
-    }
-    return a / b;
-}
+import "std/net";
 
-fn calculate() -> int! {
+fn main() {
     // The '?' operator automatically propagates errors up the stack!
-    let result = divide(10, 0)?; 
-    return result;
+    let listener = net.listen(8080)?; 
+    
+    // Or you can pattern match on the Result!
+    let conn_idx = match net.accept(listener) {
+        Ok(idx) => idx,
+        Err(e) => {
+            print("Failed to accept connection: ", e);
+            return;
+        }
+    };
 }
 ```
 
@@ -89,38 +110,31 @@ fn main() {
 }
 ```
 
-### Compile-Time Execution (The Scalpel)
-Execute expensive logic during compilation. The runtime cost is exactly zero.
+### Building a Concurrent Web Server
+Thanks to the new `std/net` module, building a web server is incredibly simple.
 ```rust
-fn main() {
-    // The math is done by the compiler, the runtime just sees: let val = 120;
-    let val = comptime {
-        let mut x = 1;
-        for i in 1..6 {
-            x = x * i;
-        }
-        x
-    };
-    print("5! is ", val);
-}
-```
+import "std/net";
 
-### The Module System
-Cleanly organize your project without configuration files.
-```rust
-// lib/math.wh
-fn add(a: int, b: int) -> int {
-    return a + b;
+fn handle_request(conn_idx: int) -> int {
+    let req = match net_recv(conn_idx) { Ok(r) => r, Err(e) => "" };
+    
+    let json_data = "{\"status\": \"success\"}";
+    let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + json_data;
+    
+    match net_send(conn_idx, response) { Ok(_) => 0, Err(e) => 1 };
+    net_close(conn_idx);
+    
+    return 0;
 }
-```
-
-```rust
-// main.wh
-import "lib/math" as m;
 
 fn main() {
-    let sum = m.add(10, 20);
-    print("Sum: ", sum);
+    print("Listening on http://localhost:8080...");
+    let listener_idx = match net_listen(8080) { Ok(idx) => idx, Err(e) => 0 };
+    
+    while true {
+        let conn_idx = match net_accept(listener_idx) { Ok(idx) => idx, Err(e) => 0 };
+        spawn handle_request(conn_idx);
+    }
 }
 ```
 
@@ -130,8 +144,8 @@ fn main() {
 Whale is built in two phases:
 1. **Frontend (Go)**: A hand-written recursive descent parser, lexer, and type-checker that produces a fully typed Abstract Syntax Tree (AST).
 2. **Backend**: 
-   * The AST can be passed directly to the `interp` package for instant, dynamic execution.
-   * Or, the AST is lowered into LLVM IR via the native `llvm` package, linked against `runtime.c`, and compiled into a standalone executable via Clang.
+   * **Interpreter**: The AST can be passed directly to the `eval` package for instant, dynamic execution.
+   * **Transpiler**: The AST is transpiled into raw Go code, allowing it to hook directly into Go's incredibly fast runtime and garbage collector, giving it native-level performance.
 
-## 📜 License
+## 📄 License
 Whale is open-source software licensed under the MIT License.
