@@ -1,0 +1,38 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# ----------------------------------------------------------------------
+# Whale Specific Ignores (Testing and Logs)
+# ----------------------------------------------------------------------
+# Do not upload user testing scripts and playground apps
+app.wh
+game.html
+score.txt
+
+# Log files generated during debugging or runtime
+*.log
+
+# Ignore our compiled CLI binary if named something other than wh.exe
+testwh.exe
+wh.exe
+
+# Any other temporary scratch files
+scratch/
+tmp/
