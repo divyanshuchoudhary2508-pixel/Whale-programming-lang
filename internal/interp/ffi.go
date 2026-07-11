@@ -45,6 +45,7 @@ var FFIRegistry = map[string]func(args []Value) Value{
 	"list_push":      ffiListPush,
 	"list_get":       ffiListGet,
 	"list_len":       ffiListLen,
+	"list_remove":    ffiListRemove,
 	
 	"read_file":      ffiReadFile,
 	"write_file":     ffiWriteFile,
@@ -263,4 +264,23 @@ func ffiListLen(args []Value) Value {
 		return intValue{v: int64(len(nativeLists[idx]))}
 	}
 	return intValue{v: 0}
+}
+
+// extern fn list_remove(list_id: int, index: int) -> int;
+func ffiListRemove(args []Value) Value {
+	listIdx := args[0].(intValue).v
+	elemIdx := args[1].(intValue).v
+	
+	listMu.Lock()
+	defer listMu.Unlock()
+	
+	if listIdx >= 0 && listIdx < int64(len(nativeLists)) {
+		lst := nativeLists[listIdx]
+		if elemIdx >= 0 && elemIdx < int64(len(lst)) {
+			// Remove element by slicing
+			nativeLists[listIdx] = append(lst[:elemIdx], lst[elemIdx+1:]...)
+			return intValue{v: 1} // success
+		}
+	}
+	return intValue{v: 0} // failure
 }
