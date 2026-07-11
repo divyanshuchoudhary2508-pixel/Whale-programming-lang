@@ -224,6 +224,8 @@ func (l *lexer) readString(startLine, startCol int) {
 			switch esc {
 			case 'n':
 				buf = append(buf, '\n')
+			case 'r':
+				buf = append(buf, '\r')
 			case 't':
 				buf = append(buf, '\t')
 			case '\\':

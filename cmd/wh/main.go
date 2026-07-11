@@ -31,6 +31,7 @@ import (
 	"github.com/whale-lang/whale/internal/parser"
 	"github.com/whale-lang/whale/internal/pkg"
 	"github.com/whale-lang/whale/internal/resolver"
+	"github.com/whale-lang/whale/internal/transpiler"
 	"github.com/whale-lang/whale/internal/types"
 	"github.com/whale-lang/whale/internal/vm"
 )
@@ -427,8 +428,54 @@ func cmdBuildProject() {
 }
 
 func cmdBuild(filename string) {
-	// Alias for run --llvm
-	cmdRun("--llvm", filename)
+	fmt.Printf("Compiling %s...\n", filename)
+	src, err := os.ReadFile(filename)
+	if err != nil {
+		fatalf("failed to read file: %v", err)
+	}
+
+	// Parse
+	lexRes := lexer.Lex(string(src))
+	if len(lexRes.Errors) > 0 {
+		fatalf("Lex error: %v", lexRes.Errors[0])
+	}
+	parseRes := parser.Parse(lexRes.Tokens)
+	if len(parseRes.Errors) > 0 {
+		fatalf("Parse error: %v", parseRes.Errors[0])
+	}
+
+	// Transpile
+	goCode, err := transpiler.Transpile(parseRes.File)
+	if err != nil {
+		fatalf("transpile error: %v", err)
+	}
+
+	// Write to temporary Go file
+	buildDir := ".whale_build"
+	os.MkdirAll(buildDir, 0755)
+	
+	goFile := filepath.Join(buildDir, "main.go")
+	os.WriteFile(goFile, []byte(goCode), 0644)
+	
+	// Init go module if doesn't exist
+	if _, err := os.Stat(filepath.Join(buildDir, "go.mod")); os.IsNotExist(err) {
+		cmd := exec.Command("go", "mod", "init", "whale_bin")
+		cmd.Dir = buildDir
+		cmd.Run()
+	}
+
+	// Compile to native binary
+	exeName := strings.TrimSuffix(filepath.Base(filename), ".wh") + ".exe"
+	fmt.Printf("Building native binary %s...\n", exeName)
+	
+	cmd := exec.Command("go", "build", "-o", "../" + exeName)
+	cmd.Dir = buildDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		fatalf("go build failed: %v\n%s", err, string(out))
+	}
+
+	fmt.Printf("Successfully compiled to %s\n", exeName)
 }
 
 // cmdCheck type-checks a file and reports errors.

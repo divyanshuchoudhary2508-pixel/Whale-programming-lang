@@ -1,0 +1,41 @@
+fn handle_request(conn_idx: int) -> int {
+    let req = match net_recv(conn_idx) {
+        Ok(r) => r,
+        Err(e) => "",
+    };
+    
+    let json_data = "{\"language\": \"Whale\", \"status\": \"top_200_incoming\", \"features\": [\"concurrency\", \"compiler\", \"web_server\"]}";
+    let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n" + json_data;
+    
+    match net_send(conn_idx, response) {
+        Ok(_) => 0,
+        Err(e) => 1,
+    };
+    
+    net_close(conn_idx);
+    
+    return 0;
+}
+
+fn main() {
+    print("====================================");
+    print("🚀 Whale Concurrent Web Server 🚀");
+    print("====================================");
+    print("Listening on http://localhost:8080...");
+    
+    let listener_idx = match net_listen(8080) {
+        Ok(idx) => idx,
+        Err(e) => 0,
+    };
+    
+    while true {
+        let conn_idx = match net_accept(listener_idx) {
+            Ok(idx) => idx,
+            Err(e) => 0,
+        };
+        print("[Server] Accepted incoming connection!");
+        spawn handle_request(conn_idx);
+    }
+}
+
+main();
