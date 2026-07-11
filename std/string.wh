@@ -6,3 +6,7 @@ pub extern fn strcpy(dest: int, src: int) -> int;
 // Simulated pointers helper
 pub extern fn _heap_write_string(ptr: int, s: string);
 pub extern fn _heap_read_string(ptr: int) -> string;
+
+// HTTP / Text Parsing helpers
+pub extern fn string_split(s: string, delim: string, index: int) -> string;
+pub extern fn string_starts_with(s: string, prefix: string) -> int;

@@ -1,0 +1,5 @@
+// Dynamic List backing
+pub extern fn list_new() -> int;
+pub extern fn list_push(list_id: int, val: any);
+pub extern fn list_get(list_id: int, index: int) -> any;
+pub extern fn list_len(list_id: int) -> int;

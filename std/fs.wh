@@ -7,6 +7,9 @@ extern fn fclose(fileptr: int) -> int;
 extern fn fread(ptr: int, size: int, nmemb: int, fileptr: int) -> int;
 extern fn fwrite(ptr: int, size: int, nmemb: int, fileptr: int) -> int;
 
+extern fn read_file(filename: string) -> Result<string>;
+extern fn write_file(filename: string, data: string) -> Result<int>;
+
 // Safe File abstraction
 pub struct File {
     ptr: int,

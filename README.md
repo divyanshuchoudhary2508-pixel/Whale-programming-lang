@@ -1,6 +1,5 @@
 <div align="center">
-  <!-- To display your uploaded image, save it to your repository as 'assets/whale.png' and it will appear here! -->
-  <img src="assets/whale.png" alt="Whale Programming Language" width="400" />
+  <img src="assets/whale.jpg" alt="Whale Programming Language" width="400" />
 </div>
 
 # 🐳 Whale v1.0
@@ -111,30 +110,23 @@ fn main() {
 ```
 
 ### Building a Concurrent Web Server
-Thanks to the new `std/net` module, building a web server is incredibly simple.
+Thanks to the new `std/net` module, building a web server is incredibly simple. We even have a higher-level routing framework in `std/http`!
 ```rust
+import "std/http";
 import "std/net";
 
-fn handle_request(conn_idx: int) -> int {
-    let req = match net_recv(conn_idx) { Ok(r) => r, Err(e) => "" };
-    
-    let json_data = "{\"status\": \"success\"}";
-    let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\n\r\n" + json_data;
-    
-    match net_send(conn_idx, response) { Ok(_) => 0, Err(e) => 1 };
-    net_close(conn_idx);
-    
-    return 0;
-}
-
 fn main() {
-    print("Listening on http://localhost:8080...");
-    let listener_idx = match net_listen(8080) { Ok(idx) => idx, Err(e) => 0 };
+    print("🐳 Whale Web Server Starting...");
+    let app = http.new_router();
     
-    while true {
-        let conn_idx = match net_accept(listener_idx) { Ok(idx) => idx, Err(e) => 0 };
-        spawn handle_request(conn_idx);
-    }
+    app.get("/", fn(conn: int, req: string) {
+        let html = "<h1>Welcome to Whale!</h1>";
+        let response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n" + html;
+        match net_send(conn, response) { Ok(_) => 0, Err(e) => 0 };
+        net_close(conn);
+    });
+
+    app.listen(8080);
 }
 ```
 

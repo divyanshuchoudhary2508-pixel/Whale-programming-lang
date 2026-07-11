@@ -1,45 +1,78 @@
-// std/http.wh
-// Advanced HTTP networking
+import "net";
+import "list";
+import "string";
 
-import "std/net";
-import "std/string";
-import "std/memory";
-
-pub struct Response {
-    status_code: int,
-    body: string,
+pub struct Route {
+    method: string,
+    path: string,
+    handler: fn
 }
 
-pub struct Server {
-    port: int,
-    socket: int,
+pub struct Router {
+    routes: int
 }
 
-// Basic HTTP GET request
-pub fn get(url: string) -> Response {
-    // In a full implementation, we'd parse the URL, resolve the DNS, 
-    // connect a TCP socket, and send the HTTP GET request.
-    // For now we simulate the response.
-    return Response {
-        status_code: 200,
-        body: "{\"status\": \"ok\"}",
-    };
+pub fn new_router() -> Router {
+    return Router { routes: list_new() };
 }
 
-// Create a new HTTP server
-pub fn listen(port: int) -> Server {
-    // We would use std/net here. For example:
-    // let sockfd = net.create_socket(2, 1, 6);
-    // net.bind(sockfd, port);
-    // net.listen(sockfd, 10);
+fn process_connection(routes: int, conn_idx: int) {
+    print("NEW CONNECTION: ", conn_idx);
     
-    // For the mock, we just return a Server struct.
-    return Server {
-        port: port,
-        socket: 0,
-    };
+    // Read incoming request
+    let req = match net_recv(conn_idx) { Ok(r) => r, Err(e) => "" };
+    
+    print("RECEIVED REQUEST: ", req);
+    
+    // Parse HTTP request: "GET /api HTTP/1.1\r\n..."
+    let method = string_split(req, " ", 0);
+    let path = string_split(req, " ", 1);
+
+    print("METHOD: ", method, " PATH: ", path);
+
+    let len = list_len(routes);
+    let mut handled = 0;
+    
+    // Find matching route
+    let mut i = 0;
+    while i < len {
+        let route = list_get(routes, i);
+        if route.method == method {
+            if route.path == path {
+                print("MATCHED ROUTE!");
+                route.handler(conn_idx, req);
+                handled = 1;
+            }
+        }
+        i = i + 1;
+    }
+    
+    if handled == 0 {
+        print("ROUTE NOT FOUND!");
+        let not_found = "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n404 Not Found - Whale Router";
+        match net_send(conn_idx, not_found) { Ok(_) => 0, Err(e) => 0 };
+        net_close(conn_idx);
+    }
 }
 
-pub fn close(s: Server) {
-    // net.close(s.socket);
+pub impl Router {
+    pub fn get(self, path: string, handler: fn) {
+        let r = Route { method: "GET", path: path, handler: handler };
+        list_push(self.routes, r);
+    }
+    
+    pub fn post(self, path: string, handler: fn) {
+        let r = Route { method: "POST", path: path, handler: handler };
+        list_push(self.routes, r);
+    }
+
+    pub fn listen(self, port: int) {
+        print("🐳 Whale Web Framework listening on port ", port, "...");
+        let listener = match net_listen(port) { Ok(idx) => idx, Err(e) => 0 };
+        
+        while true {
+            let conn = match net_accept(listener) { Ok(idx) => idx, Err(e) => 0 };
+            spawn process_connection(self.routes, conn);
+        }
+    }
 }

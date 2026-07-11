@@ -1,6 +1,8 @@
 package interp
 
 import (
+	"os"
+	"strings"
 	"sync"
 )
 
@@ -20,6 +22,12 @@ func init() {
 	heap = make([]byte, 10*1024*1024)
 }
 
+// Native Lists
+var (
+	listMu sync.Mutex
+	nativeLists [][]Value
+)
+
 // FFIRegistry maps extern function names to Go native implementations
 var FFIRegistry = map[string]func(args []Value) Value{
 	"memory_malloc":  ffiMalloc,
@@ -28,10 +36,38 @@ var FFIRegistry = map[string]func(args []Value) Value{
 	"memory_memcpy":  ffiMemcpy,
 	"string_strlen":  ffiStrlen,
 	"string_strcpy":  ffiStrcpy,
+	"string_split":   ffiStrSplit,
+	"string_starts_with": ffiStrStartsWith,
 	"string__heap_write_string": ffiHeapWriteString,
 	"string__heap_read_string": ffiHeapReadString,
 	
+	"list_new":       ffiListNew,
+	"list_push":      ffiListPush,
+	"list_get":       ffiListGet,
+	"list_len":       ffiListLen,
+	
+	"read_file":      ffiReadFile,
+	"write_file":     ffiWriteFile,
 	// I/O wrappers can be added later
+}
+
+func ffiReadFile(args []Value) Value {
+	filename := args[0].(stringValue).v
+	data, err := os.ReadFile(filename)
+	if err != nil {
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}}
+	}
+	return enumValue{Variant: "Ok", Payload: stringValue{v: string(data)}}
+}
+
+func ffiWriteFile(args []Value) Value {
+	filename := args[0].(stringValue).v
+	data := args[1].(stringValue).v
+	err := os.WriteFile(filename, []byte(data), 0644)
+	if err != nil {
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}}
+	}
+	return enumValue{Variant: "Ok", Payload: intValue{v: 0}}
 }
 
 // extern fn malloc(size: int) -> int;
@@ -158,4 +194,73 @@ func ffiHeapReadString(args []Value) Value {
 		length++
 	}
 	return stringValue{v: string(heap[ptr : ptr+length])}
+}
+
+// extern fn string_split(s: string, delim: string, index: int) -> string;
+func ffiStrSplit(args []Value) Value {
+	s := args[0].(stringValue).v
+	delim := args[1].(stringValue).v
+	index := int(args[2].(intValue).v)
+	
+	parts := strings.Split(s, delim)
+	if index >= 0 && index < len(parts) {
+		return stringValue{v: parts[index]}
+	}
+	return stringValue{v: ""}
+}
+
+// extern fn string_starts_with(s: string, prefix: string) -> int; // Returns 1 if true, 0 if false
+func ffiStrStartsWith(args []Value) Value {
+	s := args[0].(stringValue).v
+	prefix := args[1].(stringValue).v
+	if strings.HasPrefix(s, prefix) {
+		return intValue{v: 1}
+	}
+	return intValue{v: 0}
+}
+
+// extern fn list_new() -> int;
+func ffiListNew(args []Value) Value {
+	listMu.Lock()
+	defer listMu.Unlock()
+	nativeLists = append(nativeLists, []Value{})
+	return intValue{v: int64(len(nativeLists) - 1)}
+}
+
+// extern fn list_push(list_id: int, val: any);
+func ffiListPush(args []Value) Value {
+	idx := args[0].(intValue).v
+	val := args[1]
+	listMu.Lock()
+	defer listMu.Unlock()
+	if idx >= 0 && idx < int64(len(nativeLists)) {
+		nativeLists[idx] = append(nativeLists[idx], val)
+	}
+	return nullValue{}
+}
+
+// extern fn list_get(list_id: int, index: int) -> any;
+func ffiListGet(args []Value) Value {
+	idx := args[0].(intValue).v
+	elemIdx := args[1].(intValue).v
+	listMu.Lock()
+	defer listMu.Unlock()
+	if idx >= 0 && idx < int64(len(nativeLists)) {
+		lst := nativeLists[idx]
+		if elemIdx >= 0 && elemIdx < int64(len(lst)) {
+			return lst[elemIdx]
+		}
+	}
+	return nullValue{}
+}
+
+// extern fn list_len(list_id: int) -> int;
+func ffiListLen(args []Value) Value {
+	idx := args[0].(intValue).v
+	listMu.Lock()
+	defer listMu.Unlock()
+	if idx >= 0 && idx < int64(len(nativeLists)) {
+		return intValue{v: int64(len(nativeLists[idx]))}
+	}
+	return intValue{v: 0}
 }

@@ -1,0 +1,69 @@
+import "std/http";
+import "std/net";
+import "std/fs";
+import "std/string";
+import "std/list";
+
+fn get_high_score() -> string {
+    return match fs_read_to_string("score.txt") {
+        Ok(s) => s,
+        Err(e) => "0"
+    };
+}
+
+fn set_high_score(score_str: string) {
+    match fs_write_string("score.txt", score_str) {
+        Ok(_) => 0,
+        Err(e) => 0
+    };
+}
+
+fn main() {
+    print("====================================");
+    print("🐳 Whale Web Server Starting...");
+    print("====================================");
+    
+    // Ensure the score file exists
+    set_high_score("0");
+
+    let app = http.new_router();
+    
+    // Serve the Snake Game HTML
+    app.get("/", fn(conn: int, req: string) {
+        let html = match fs_read_to_string("game.html") {
+            Ok(content) => content,
+            Err(e) => "<h1>Error loading game.html</h1>"
+        };
+        
+        let response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: text/html\r\n\r\n" + html;
+        match net_send(conn, response) { Ok(_) => 0, Err(e) => 0 };
+        net_close(conn);
+    });
+    
+    // API: Get High Score
+    app.get("/api/score", fn(conn: int, req: string) {
+        let current_score = get_high_score();
+        let json = "{\"high_score\": " + current_score + "}";
+        
+        let response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n" + json;
+        match net_send(conn, response) { Ok(_) => 0, Err(e) => 0 };
+        net_close(conn);
+    });
+    
+    // API: Update High Score
+    app.post("/api/score", fn(conn: int, req: string) {
+        let body = string_split(req, "\r\n\r\n", 1);
+        let p = string_split(body, ":", 1);
+        let new_score_str = string_split(p, "}", 0);
+        
+        set_high_score(new_score_str);
+
+        let response = "HTTP/1.1 200 OK\r\nConnection: close\r\nContent-Type: application/json\r\n\r\n{\"status\": \"updated\"}";
+        match net_send(conn, response) { Ok(_) => 0, Err(e) => 0 };
+        net_close(conn);
+    });
+    
+    app.listen(8080);
+}
+
+main();
