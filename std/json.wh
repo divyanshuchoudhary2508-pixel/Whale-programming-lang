@@ -1,61 +1,21 @@
-// std/json.wh
-// Minimal JSON encoding/decoding
-
-import "std/string";
-
-// Basic JSON value representation
-pub struct JsonValue {
-    kind: int, // 0 = null, 1 = bool, 2 = int, 3 = string
-    int_val: int,
-    str_val: string,
+pub struct JsonArray {
+    items: [JsonNode]
 }
 
-pub fn new_int(val: int) -> JsonValue {
-    return JsonValue {
-        kind: 2,
-        int_val: val,
-        str_val: "",
-    };
+pub struct JsonObject {
+    keys: [string],
+    values: [JsonNode]
 }
 
-pub fn new_string(val: string) -> JsonValue {
-    return JsonValue {
-        kind: 3,
-        int_val: 0,
-        str_val: val,
-    };
+pub enum JsonNode {
+    Null,
+    Bool(bool),
+    Number(float),
+    String(string),
+    Array(JsonArray),
+    Object(JsonObject)
 }
 
-// Encode a JsonValue to a string
-pub fn encode(val: JsonValue) -> string {
-    if val.kind == 0 {
-        return "null";
-    }
-    if val.kind == 1 {
-        if val.int_val == 1 {
-            return "true";
-        }
-        return "false";
-    }
-    if val.kind == 2 {
-        // We'd need a real int_to_string function, for now we assume string.from_int exists
-        // Actually, we don't have string.from_int yet, so let's just return a placeholder for this mock
-        return "[int]";
-    }
-    if val.kind == 3 {
-        // We'd use a real concat function, for now we mock it
-        return "[\"string\"]";
-    }
-    return "{}";
-}
-
-// Very basic mock parser
-pub fn parse(src: string) -> JsonValue {
-    // In a real implementation we would parse characters.
-    // For now we just return a string type with the source if it starts with quote.
-    let len = string.len(src);
-    if len > 0 {
-        return new_string("mock_parsed");
-    }
-    return JsonValue { kind: 0, int_val: 0, str_val: "" };
+pub fn parse(json_str: string) -> Result<JsonNode> {
+    return json_parse(json_str);
 }

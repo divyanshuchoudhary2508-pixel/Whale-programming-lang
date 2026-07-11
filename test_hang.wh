@@ -1,0 +1,12 @@
+import "std/json";
+fn main() {
+    print("1");
+    let raw = "{\"a\": 1}";
+    let parsed = json.parse(raw);
+    print("2");
+    match parsed {
+        Ok(n) => { print("3"); }
+        Err(e) => { print("4"); }
+    }
+}
+main();

@@ -13,6 +13,8 @@
 package interp
 
 import (
+	"encoding/csv"
+	"encoding/json"
 	"fmt"
 	"math"
 	"net"
@@ -1215,6 +1217,10 @@ func (i *Interpreter) evalCall(e *ast.CallExpr) Value {
 			return i.callPop(e)
 		case "type_of":
 			return i.callTypeOf(e)
+		case "json_parse":
+			return i.callJsonParse(e)
+		case "csv_parse":
+			return i.callCsvParse(e)
 		case "split":
 			return i.callSplit(e)
 		case "trim":
@@ -2245,4 +2251,77 @@ func (i *Interpreter) callMapGet(e *ast.CallExpr) Value {
 		return stringValue{v: nativeMaps[idx][k]}
 	}
 	return stringValue{v: ""}
+}
+
+// ============================================================================
+// Data Parsing
+// ============================================================================
+
+func (i *Interpreter) callJsonParse(e *ast.CallExpr) Value {
+	jsonStr := i.evalExpr(e.Args[0]).(stringValue).v
+	var data interface{}
+	err := json.Unmarshal([]byte(jsonStr), &data)
+	if err != nil {
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}}
+	}
+	
+	return enumValue{Variant: "Ok", Payload: i.goValueToJsonNode(data)}
+}
+
+func (i *Interpreter) goValueToJsonNode(data interface{}) Value {
+	if data == nil {
+		return enumValue{Variant: "Null"}
+	}
+	switch v := data.(type) {
+	case bool:
+		return enumValue{Variant: "Bool", Payload: boolValue{v: v}}
+	case float64:
+		return enumValue{Variant: "Number", Payload: floatValue{v: v}}
+	case string:
+		return enumValue{Variant: "String", Payload: stringValue{v: v}}
+	case []interface{}:
+		var lst listValue
+		for _, elem := range v {
+			lst.elements = append(lst.elements, i.goValueToJsonNode(elem))
+		}
+		fields := make(map[string]Value)
+		fields["items"] = lst
+		arr := structValue{fields: fields}
+		return enumValue{Variant: "Array", Payload: arr}
+	case map[string]interface{}:
+		var keys listValue
+		var values listValue
+		for k, val := range v {
+			keys.elements = append(keys.elements, stringValue{v: k})
+			values.elements = append(values.elements, i.goValueToJsonNode(val))
+		}
+		
+		// Create JsonObject struct (keys, values)
+		fields := make(map[string]Value)
+		fields["keys"] = keys
+		fields["values"] = values
+		obj := structValue{fields: fields}
+		
+		return enumValue{Variant: "Object", Payload: obj}
+	}
+	return enumValue{Variant: "Null"}
+}
+
+func (i *Interpreter) callCsvParse(e *ast.CallExpr) Value {
+	csvStr := i.evalExpr(e.Args[0]).(stringValue).v
+	reader := csv.NewReader(strings.NewReader(csvStr))
+	records, err := reader.ReadAll()
+	if err != nil {
+		return enumValue{Variant: "Err", Payload: stringValue{v: err.Error()}}
+	}
+	
+	var outer listValue
+	for _, row := range records {
+		var inner listValue
+		for _, col := range row {
+			inner.elements = append(inner.elements, stringValue{v: col})
+		}
+		outer.elements = append(outer.elements, inner)
+	}
+	return enumValue{Variant: "Ok", Payload: outer}
 }

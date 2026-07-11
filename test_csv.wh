@@ -1,0 +1,15 @@
+import "std/csv";
+
+fn main() {
+    let raw_csv = "name,speed,type\nWhale,911 GT3,compiled\nPython,Civic,interpreted";
+    
+    print("Parsing CSV...");
+    
+    let parsed = csv.parse_records(raw_csv);
+    match parsed {
+        Ok(records) => print("Rows: " + to_string(len(records))),
+        Err(e) => print("Failed to parse CSV: " + e)
+    };
+}
+
+main();

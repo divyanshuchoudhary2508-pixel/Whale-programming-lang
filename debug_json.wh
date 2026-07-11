@@ -1,0 +1,21 @@
+pub struct JsonArray {
+    items: list<JsonNode>
+}
+
+pub struct JsonObject {
+    keys: list<string>,
+    values: list<JsonNode>
+}
+
+pub enum JsonNode {
+    Null,
+    Bool(bool),
+    Number(float),
+    String(string),
+    Array(JsonArray),
+    Object(JsonObject)
+}
+
+pub fn parse(json_str: string) -> Result<JsonNode> {
+    return json_parse(json_str);
+}

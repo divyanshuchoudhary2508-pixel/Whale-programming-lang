@@ -1,0 +1,16 @@
+import "std/json";
+
+fn main() {
+    let raw_json = "{ \"name\": \"Whale\", \"version\": 1.0, \"is_fast\": true, \"tags\": [\"systems\", \"scripting\"] }";
+    
+    print("Parsing JSON...");
+    
+    // We use match to handle the Result
+    let parsed = json.parse(raw_json);
+    match parsed {
+        Ok(node) => print("Successfully parsed JSON!"),
+        Err(e) => print("Failed to parse JSON: " + e)
+    };
+}
+
+main();

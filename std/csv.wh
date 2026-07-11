@@ -1,0 +1,3 @@
+pub fn parse_records(csv_str: string) -> Result<[[string]]> {
+    return csv_parse(csv_str);
+}

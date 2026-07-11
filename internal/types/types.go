@@ -318,6 +318,10 @@ func builtinScope() *Scope {
 	s.define("pop", TFun{Params: []Type{TList{Elem: TUnknown{}}}, Ret: TUnknown{}})
 	s.define("type_of", TFun{Params: []Type{TUnknown{}}, Ret: TString{}})
 	
+	// Data parsing builtins
+	s.define("json_parse", TFun{Params: []Type{TString{}}, Ret: TResult{Elem: TUnknown{}}})
+	s.define("csv_parse", TFun{Params: []Type{TString{}}, Ret: TResult{Elem: TList{Elem: TList{Elem: TString{}}}}})
+	
 	// SIMD Built-ins
 	s.define("vec_add", TFun{Params: []Type{TVec256{Elem: TUnknown{}}, TVec256{Elem: TUnknown{}}}, Ret: TVec256{Elem: TUnknown{}}})
 	s.define("vec_mul", TFun{Params: []Type{TVec256{Elem: TUnknown{}}, TVec256{Elem: TUnknown{}}}, Ret: TVec256{Elem: TUnknown{}}})
@@ -340,6 +344,35 @@ func builtinScope() *Scope {
 func (c *checker) checkMatchExpr(m *ast.MatchExpr) Type {
 	exprT := c.checkExpr(m.Expr)
 	
+	if resT, isRes := exprT.(TResult); isRes {
+		var unifiedRetType Type = TUnknown{}
+		for _, arm := range m.Arms {
+			prevEnv := c.env
+			c.env = newScope(c.env)
+			if arm.Variant == "Ok" {
+				if arm.Binding != "" {
+					c.env.define(arm.Binding, resT.Elem)
+				}
+			} else if arm.Variant == "Err" {
+				if arm.Binding != "" {
+					c.env.define(arm.Binding, TString{})
+				}
+			} else if !arm.IsCatchAll {
+				c.errorAt(arm.Pos, "invalid variant %q for Result type", arm.Variant)
+			}
+			
+			armType := c.checkExpr(arm.Body)
+			c.env = prevEnv
+			
+			if isUnknown(unifiedRetType) {
+				unifiedRetType = armType
+			} else if !isUnknown(armType) && !sameType(unifiedRetType, armType) {
+				c.errorAt(arm.Pos, "match arms have incompatible types: %s vs %s", unifiedRetType, armType)
+			}
+		}
+		return unifiedRetType
+	}
+
 	enumType, ok := exprT.(TEnum)
 	if !ok {
 		if !isUnknown(exprT) {
