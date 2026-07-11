@@ -1,0 +1,8 @@
+fn messy(a: int, b: string) -> int {
+    print(b);
+    if a == 0 {
+        return 0;
+    } else {
+        return a + 1;
+    }
+}

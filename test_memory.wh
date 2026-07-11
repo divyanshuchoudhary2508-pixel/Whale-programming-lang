@@ -1,0 +1,40 @@
+import "std/memory";
+import "std/string";
+
+fn main() {
+    print("Testing Simulated Memory & FFI");
+    
+    // Allocate 100 bytes on the simulated heap
+    let ptr = memory.malloc(100);
+    print("Allocated pointer: " + to_string(ptr));
+    
+    // Write a string to this memory
+    let greeting = "Hello, Whale C-FFI!";
+    string._heap_write_string(ptr, greeting);
+    
+    // Calculate string length using libc's strlen
+    let length = string.strlen(ptr);
+    print("Length calculated by strlen: " + to_string(length));
+    
+    // Allocate a new buffer and copy it using strcpy
+    let dest_ptr = memory.malloc(100);
+    let copied = string.strcpy(dest_ptr, ptr);
+    
+    // Read the string back from the destination pointer
+    let retrieved = string._heap_read_string(dest_ptr);
+    print("String at destination: " + retrieved);
+    
+    // Realloc the destination buffer
+    let new_dest = memory.realloc(dest_ptr, 200);
+    print("Reallocated pointer: " + to_string(new_dest));
+    let retrieved_after_realloc = string._heap_read_string(new_dest);
+    print("String after realloc: " + retrieved_after_realloc);
+    
+    // Free the memory
+    memory.free(ptr);
+    memory.free(new_dest);
+    
+    print("Memory test successful!");
+}
+
+main();

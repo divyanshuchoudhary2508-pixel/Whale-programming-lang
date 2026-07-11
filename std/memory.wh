@@ -1,19 +1,4 @@
-// std::memory
-// Low-level safe wrappers around libc memory functions.
-
-extern fn malloc(size: int) -> int;
-extern fn free(ptr: int) -> void;
-extern fn memcpy(dest: int, src: int, n: int) -> int;
-extern fn realloc(ptr: int, size: int) -> int;
-
-pub fn alloc(size: int) -> int {
-    return malloc(size);
-}
-
-pub fn dealloc(ptr: int) {
-    free(ptr);
-}
-
-pub fn copy(dest: int, src: int, n: int) {
-    memcpy(dest, src, n);
-}
+pub extern fn malloc(size: int) -> int;
+pub extern fn free(ptr: int);
+pub extern fn realloc(ptr: int, size: int) -> int;
+pub extern fn memcpy(dest: int, src: int, n: int) -> int;

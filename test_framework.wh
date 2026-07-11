@@ -1,0 +1,25 @@
+fn test_addition() {
+    assert_eq(2 + 2, 4);
+}
+
+fn test_string_concat() {
+    let s = "hello " + "whale";
+    assert_eq(s, "hello whale");
+}
+
+fn test_failing() {
+    assert_eq(5, 10);
+}
+
+fn test_truthiness() {
+    assert_true(10 > 5);
+}
+
+fn test_panic() {
+    // This will cause a safe failure
+    assert_true(false);
+}
+
+fn main() {
+    print("This should not run during wh test!");
+}

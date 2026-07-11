@@ -93,6 +93,8 @@ func prefixDecl(s ast.Stmt, prefix string) {
 		if s.Name != "main" {
 			s.Name = prefix + s.Name
 		}
+	case *ast.ExternFnStmt:
+		s.Name = prefix + s.Name
 	case *ast.StructDecl:
 		s.Name = prefix + s.Name
 	case *ast.EnumDecl:
@@ -111,6 +113,8 @@ func rewriteGlobals(file *ast.File, prefix string) {
 	for _, stmt := range file.Body {
 		switch s := stmt.(type) {
 		case *ast.FnStmt:
+			globals[strings.TrimPrefix(s.Name, prefix)] = true
+		case *ast.ExternFnStmt:
 			globals[strings.TrimPrefix(s.Name, prefix)] = true
 		case *ast.StructDecl:
 			globals[strings.TrimPrefix(s.Name, prefix)] = true

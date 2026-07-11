@@ -454,8 +454,16 @@ func (i *Interpreter) evalStmt(s ast.Stmt) {
 	case *ast.ChanSendStmt:
 		i.evalChanSend(s)
 	case *ast.ExternFnStmt:
-		// Extern functions are handled by LLVM. In the interpreter, they are either
-		// replaced by builtins or unavailable. We simply ignore the declaration.
+		if nativeFn, ok := FFIRegistry[s.Name]; ok {
+			i.env.define(s.Name, nativeFnValue{name: s.Name, fn: nativeFn}, false)
+		} else {
+			// If not in registry, define a dummy that panics when called
+			dummy := nativeFnValue{name: s.Name, fn: func(args []Value) Value {
+				i.err(s.Pos, "unresolved extern function: "+s.Name)
+				return nullValue{}
+			}}
+			i.env.define(s.Name, dummy, false)
+		}
 	case *ast.TraitDecl:
 		// Traits are purely for compile-time type checking. Ignore at runtime.
 	case *ast.ImplDecl:
@@ -1262,6 +1270,11 @@ func (i *Interpreter) evalCall(e *ast.CallExpr) Value {
 			return i.callNetClose(e)
 		case "net_dial":
 			return i.callNetDial(e)
+		// Testing
+		case "assert_eq":
+			return i.callAssertEq(e)
+		case "assert_true":
+			return i.callAssertTrue(e)
 		// Map
 		case "map_new":
 			return i.callMapNew(e)
@@ -2324,4 +2337,41 @@ func (i *Interpreter) callCsvParse(e *ast.CallExpr) Value {
 		outer.elements = append(outer.elements, inner)
 	}
 	return enumValue{Variant: "Ok", Payload: outer}
+}
+
+// ============================================================================
+// Testing Framework Built-ins
+// ============================================================================
+
+func (i *Interpreter) callAssertEq(e *ast.CallExpr) Value {
+	actual := i.evalExpr(e.Args[0])
+	expected := i.evalExpr(e.Args[1])
+	if len(i.errs) > 0 {
+		return nullValue{}
+	}
+	
+	// Compare string representations for structural equality
+	// In the future, this should do a deep recursive equality check, but this is safe for primitive types
+	actStr := actual.String()
+	expStr := expected.String()
+	
+	if actStr != expStr {
+		panic(fmt.Sprintf("assert_eq failed: expected %s, got %s", expStr, actStr))
+	}
+	return nullValue{}
+}
+
+func (i *Interpreter) callAssertTrue(e *ast.CallExpr) Value {
+	cond := i.evalExpr(e.Args[0])
+	if len(i.errs) > 0 {
+		return nullValue{}
+	}
+	bv, ok := cond.(boolValue)
+	if !ok {
+		panic(fmt.Sprintf("assert_true failed: expression did not evaluate to a boolean, got %s", cond.String()))
+	}
+	if !bv.v {
+		panic("assert_true failed: condition was false")
+	}
+	return nullValue{}
 }

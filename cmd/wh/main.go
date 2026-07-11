@@ -55,6 +55,11 @@ func main() {
 			fatalf("usage: wh parse <file.wh>")
 		}
 		cmdParse(os.Args[2])
+	case "test":
+		if len(os.Args) < 3 {
+			fatalf("usage: wh test <file.wh>")
+		}
+		cmdTest(os.Args[2])
 	case "fmt":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: wh fmt <file.wh>")
@@ -522,6 +527,7 @@ func printHelp() {
 Usage:
   wh run <file.wh>     Run a Whale program
   wh parse <file.wh>   Parse and print the AST
+  wh test <file.wh>    Run tests in a file
   wh fmt <file.wh>     Format a file in place
   wh lsp               Start the language server
   wh init <name>       Initialize a new project

@@ -1,0 +1,19 @@
+fn worker(ch: chan<int>, id: int) {
+    print("Worker " + to_string(id) + " started");
+    ch <- id * 10;
+    print("Worker " + to_string(id) + " done");
+}
+
+fn main() {
+    print("Starting concurrency test");
+    let ch = make_chan();
+    spawn worker(ch, 1);
+    spawn worker(ch, 2);
+    
+    let res1 = <-ch;
+    let res2 = <-ch;
+    
+    print("Received: " + to_string(res1) + ", " + to_string(res2));
+}
+
+main();

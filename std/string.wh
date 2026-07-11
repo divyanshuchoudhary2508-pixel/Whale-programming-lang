@@ -1,13 +1,8 @@
-// std::string
-// Fast C-FFI string manipulation functions
+import "memory";
 
-extern fn strlen(s: string) -> int;
-extern fn strcmp(s1: string, s2: string) -> int;
+pub extern fn strlen(ptr: int) -> int;
+pub extern fn strcpy(dest: int, src: int) -> int;
 
-pub fn len(s: string) -> int {
-    return strlen(s);
-}
-
-pub fn compare(s1: string, s2: string) -> int {
-    return strcmp(s1, s2);
-}
+// Simulated pointers helper
+pub extern fn _heap_write_string(ptr: int, s: string);
+pub extern fn _heap_read_string(ptr: int) -> string;

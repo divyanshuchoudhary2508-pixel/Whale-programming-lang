@@ -313,6 +313,8 @@ func builtinScope() *Scope {
 	s.define("net_send", TFun{Params: []Type{TInt{}, TString{}}, Ret: TResult{Elem: TInt{}}})
 	s.define("net_close", TFun{Params: []Type{TInt{}}, Ret: TResult{Elem: TInt{}}})
 	s.define("net_dial", TFun{Params: []Type{TString{}, TInt{}}, Ret: TResult{Elem: TInt{}}})
+	s.define("assert_eq", TFun{Params: []Type{TGenericVar{Name: "T"}, TGenericVar{Name: "T"}}, Ret: TUnknown{}})
+	s.define("assert_true", TFun{Params: []Type{TBool{}}, Ret: TUnknown{}})
 	s.define("lines", TFun{Params: []Type{TString{}}, Ret: TList{Elem: TString{}}})
 	s.define("push", TFun{Params: []Type{TList{Elem: TUnknown{}}, TUnknown{}}, Ret: TList{Elem: TUnknown{}}})
 	s.define("pop", TFun{Params: []Type{TList{Elem: TUnknown{}}}, Ret: TUnknown{}})
