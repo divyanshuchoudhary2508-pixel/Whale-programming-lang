@@ -68,26 +68,26 @@ type TResult struct{ Elem Type }
 type TPointer struct{ Elem Type }
 type TVolatilePointer struct{ Elem Type }
 
-func (TInt) typeMarker()     {}
-func (TUint) typeMarker()    {}
-func (TFloat) typeMarker()   {}
-func (TString) typeMarker()  {}
-func (TBool) typeMarker()    {}
-func (TUnit) typeMarker()    {}
-func (TList) typeMarker()    {}
-func (TStream) typeMarker()  {}
-func (TVec256) typeMarker()  {}
-func (TFun) typeMarker()     {}
-func (TStruct) typeMarker()  {}
-func (TEnum) typeMarker()    {}
-func (TModule) typeMarker()  {}
-func (TGenericVar) typeMarker() {}
-func (TInstantiated) typeMarker() {}
-func (TUnknown) typeMarker() {}
-func (TChan) typeMarker()    {}
-func (TError) typeMarker()   {}
-func (TResult) typeMarker()  {}
-func (TPointer) typeMarker() {}
+func (TInt) typeMarker()             {}
+func (TUint) typeMarker()            {}
+func (TFloat) typeMarker()           {}
+func (TString) typeMarker()          {}
+func (TBool) typeMarker()            {}
+func (TUnit) typeMarker()            {}
+func (TList) typeMarker()            {}
+func (TStream) typeMarker()          {}
+func (TVec256) typeMarker()          {}
+func (TFun) typeMarker()             {}
+func (TStruct) typeMarker()          {}
+func (TEnum) typeMarker()            {}
+func (TModule) typeMarker()          {}
+func (TGenericVar) typeMarker()      {}
+func (TInstantiated) typeMarker()    {}
+func (TUnknown) typeMarker()         {}
+func (TChan) typeMarker()            {}
+func (TError) typeMarker()           {}
+func (TResult) typeMarker()          {}
+func (TPointer) typeMarker()         {}
 func (TVolatilePointer) typeMarker() {}
 
 func (t TInt) String() string    { return "int" }
@@ -128,9 +128,9 @@ func (t TFun) String() string {
 	}
 	return out
 }
-func (t TStruct) String() string  { return t.Name }
-func (t TEnum) String() string    { return t.Name }
-func (t TModule) String() string  { return t.Name }
+func (t TStruct) String() string     { return t.Name }
+func (t TEnum) String() string       { return t.Name }
+func (t TModule) String() string     { return t.Name }
 func (t TGenericVar) String() string { return t.Name }
 func (t TInstantiated) String() string {
 	out := t.Base.String() + "<"
@@ -157,7 +157,7 @@ func (t TResult) String() string {
 	}
 	return "Result<" + t.Elem.String() + ">"
 }
-func (t TPointer) String() string { return "*" + t.Elem.String() }
+func (t TPointer) String() string         { return "*" + t.Elem.String() }
 func (t TVolatilePointer) String() string { return "*volatile " + t.Elem.String() }
 
 // ============================================================================
@@ -244,6 +244,8 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 			c.funcs[s.Name] = s
 		case *ast.ExternFnStmt:
 			c.externs[s.Name] = s
+		case *ast.LetStmt:
+			c.env.define(s.Name, c.checkExpr(s.Value))
 		}
 	}
 	// Second pass: pre-define function types and enum variants in env
@@ -261,7 +263,7 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 		c.withTypeParams(s.TypeParams, func() {
 			tenum := TEnum{Name: name, Variants: make(map[string]Type)}
 			c.env.define(name, tenum)
-			
+
 			for _, v := range s.Variants {
 				var payloadType Type
 				if v.Type != nil {
@@ -269,7 +271,7 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 					payloadType = c.resolveTypeExpr(v.Type)
 				}
 				tenum.Variants[v.Name] = payloadType
-				
+
 				// Register constructor in scope
 				var retType Type = tenum
 				if len(s.TypeParams) > 0 {
@@ -279,7 +281,7 @@ func CheckWithConfig(file ast.File, cfg Config) Result {
 					}
 					retType = TInstantiated{Base: tenum, Args: args}
 				}
-				
+
 				if payloadType != nil {
 					c.env.define(v.Name, TFun{Params: []Type{payloadType}, Ret: retType})
 				} else {
@@ -325,22 +327,22 @@ func builtinScope() *Scope {
 	s.define("push", TFun{Params: []Type{TList{Elem: TUnknown{}}, TUnknown{}}, Ret: TList{Elem: TUnknown{}}})
 	s.define("pop", TFun{Params: []Type{TList{Elem: TUnknown{}}}, Ret: TUnknown{}})
 	s.define("type_of", TFun{Params: []Type{TUnknown{}}, Ret: TString{}})
-	
+
 	// Data parsing builtins
 	s.define("json_parse", TFun{Params: []Type{TString{}}, Ret: TResult{Elem: TUnknown{}}})
 	s.define("csv_parse", TFun{Params: []Type{TString{}}, Ret: TResult{Elem: TList{Elem: TList{Elem: TString{}}}}})
-	
+
 	// SIMD Built-ins
 	s.define("vec_add", TFun{Params: []Type{TVec256{Elem: TUnknown{}}, TVec256{Elem: TUnknown{}}}, Ret: TVec256{Elem: TUnknown{}}})
 	s.define("vec_mul", TFun{Params: []Type{TVec256{Elem: TUnknown{}}, TVec256{Elem: TUnknown{}}}, Ret: TVec256{Elem: TUnknown{}}})
-	
+
 	// String standard library
 	s.define("split", TFun{Params: []Type{TString{}, TString{}}, Ret: TList{Elem: TString{}}})
 	s.define("trim", TFun{Params: []Type{TString{}}, Ret: TString{}})
 	s.define("replace", TFun{Params: []Type{TString{}, TString{}, TString{}}, Ret: TString{}})
 	s.define("to_lower", TFun{Params: []Type{TString{}}, Ret: TString{}})
 	s.define("to_upper", TFun{Params: []Type{TString{}}, Ret: TString{}})
-	
+
 	// Math standard library
 	s.define("abs", TFun{Params: []Type{TFloat{}}, Ret: TFloat{}})
 	s.define("max", TFun{Params: []Type{TFloat{}, TFloat{}}, Ret: TFloat{}})
@@ -351,7 +353,7 @@ func builtinScope() *Scope {
 
 func (c *checker) checkMatchExpr(m *ast.MatchExpr) Type {
 	exprT := c.checkExpr(m.Expr)
-	
+
 	if resT, isRes := exprT.(TResult); isRes {
 		var unifiedRetType Type = TUnknown{}
 		for _, arm := range m.Arms {
@@ -368,10 +370,10 @@ func (c *checker) checkMatchExpr(m *ast.MatchExpr) Type {
 			} else if !arm.IsCatchAll {
 				c.errorAt(arm.Pos, "invalid variant %q for Result type", arm.Variant)
 			}
-			
+
 			armType := c.checkExpr(arm.Body)
 			c.env = prevEnv
-			
+
 			if isUnknown(unifiedRetType) {
 				unifiedRetType = armType
 			} else if !isUnknown(armType) && !sameType(unifiedRetType, armType) {
@@ -388,23 +390,23 @@ func (c *checker) checkMatchExpr(m *ast.MatchExpr) Type {
 		}
 		return TUnknown{}
 	}
-	
+
 	enumDecl, ok := c.enums[enumType.Name]
 	if !ok {
 		c.errorAt(m.Pos, "unknown enum %q", enumType.Name)
 		return TUnknown{}
 	}
-	
+
 	seenVariants := make(map[string]bool)
 	hasCatchAll := false
 	var unifiedRetType Type = TUnknown{}
-	
+
 	for _, arm := range m.Arms {
 		if arm.IsCatchAll {
 			hasCatchAll = true
 		} else {
 			seenVariants[arm.Variant] = true
-			
+
 			// Verify variant exists in enum
 			var variantDecl *ast.EnumVariant
 			for _, v := range enumDecl.Variants {
@@ -413,16 +415,16 @@ func (c *checker) checkMatchExpr(m *ast.MatchExpr) Type {
 					break
 				}
 			}
-			
+
 			if variantDecl == nil {
 				c.errorAt(arm.Pos, "variant %q does not exist in enum %q", arm.Variant, enumType.Name)
 				continue
 			}
-			
+
 			// Open a new scope for the arm
 			prevEnv := c.env
 			c.env = newScope(c.env)
-			
+
 			// Check binding
 			if arm.Binding != "" {
 				if variantDecl.Type == nil {
@@ -434,20 +436,20 @@ func (c *checker) checkMatchExpr(m *ast.MatchExpr) Type {
 			} else if variantDecl.Type != nil {
 				c.errorAt(arm.Pos, "variant %q has a payload, but arm is missing a binding", arm.Variant)
 			}
-			
+
 			armType := c.checkExpr(arm.Body)
-			
+
 			if isUnknown(unifiedRetType) && !isUnknown(armType) {
 				unifiedRetType = armType
 			} else if !isUnknown(unifiedRetType) && !isUnknown(armType) && !sameType(unifiedRetType, armType) {
 				c.errorAt(arm.Pos, "match arms have incompatible types: expected %s, got %s", unifiedRetType, armType)
 			}
-			
+
 			// Restore environment
 			c.env = prevEnv
 		}
 	}
-	
+
 	// Check for the catch-all arm
 	if hasCatchAll {
 		// Just evaluate the catch-all arm type
@@ -465,7 +467,7 @@ func (c *checker) checkMatchExpr(m *ast.MatchExpr) Type {
 			}
 		}
 	}
-	
+
 	// Check exhaustiveness
 	if !hasCatchAll {
 		for _, v := range enumDecl.Variants {
@@ -474,7 +476,7 @@ func (c *checker) checkMatchExpr(m *ast.MatchExpr) Type {
 			}
 		}
 	}
-	
+
 	return unifiedRetType
 }
 
@@ -510,13 +512,13 @@ func (s *Scope) define(name string, t Type) {
 // ============================================================================
 
 type checker struct {
-	errors    []Error
-	env       *Scope
-	structs   map[string]*ast.StructDecl
-	enums     map[string]*ast.EnumDecl
-	funcs     map[string]*ast.FnStmt
-	externs   map[string]*ast.ExternFnStmt
-	retType   Type
+	errors     []Error
+	env        *Scope
+	structs    map[string]*ast.StructDecl
+	enums      map[string]*ast.EnumDecl
+	funcs      map[string]*ast.FnStmt
+	externs    map[string]*ast.ExternFnStmt
+	retType    Type
 	exprTypes  map[ast.Expr]Type
 	importer   Importer
 	modules    map[string]*Scope
@@ -616,11 +618,11 @@ func (c *checker) checkStmt(s ast.Stmt) {
 		listTy := c.checkExpr(s.List)
 		idxTy := c.checkExpr(s.Index)
 		valTy := c.checkExpr(s.Value)
-		
+
 		if !sameType(idxTy, TInt{}) && !isUnknown(idxTy) {
 			c.errorAt(s.Pos, "index must be int, got %s", idxTy)
 		}
-		
+
 		if l, ok := listTy.(TList); ok {
 			if !sameType(l.Elem, valTy) && !isUnknown(l.Elem) && !isUnknown(valTy) {
 				c.errorAt(s.Pos, "cannot assign %s to list of %s", valTy, l.Elem)
@@ -726,12 +728,12 @@ func (c *checker) checkFnDecl(s *ast.FnStmt) {
 		}
 		prev := c.env
 		c.env = child
-		
+
 		prevFn := c.currentFn
 		c.currentFn = s
-		
+
 		c.checkBlock(s.Body)
-		
+
 		c.currentFn = prevFn
 		c.env = prev
 	})
@@ -953,7 +955,7 @@ func (c *checker) checkExprInternal(e ast.Expr) Type {
 
 func (c *checker) checkFnLit(e *ast.FnLit, inferredParams []Type) Type {
 	paramTypes := make([]Type, len(e.Params))
-	
+
 	child := newScope(c.env)
 	for i, p := range e.Params {
 		pt := c.resolveTypeName(e.Pos, p.Type)
@@ -963,10 +965,10 @@ func (c *checker) checkFnLit(e *ast.FnLit, inferredParams []Type) Type {
 		paramTypes[i] = pt
 		child.define(p.Name, pt)
 	}
-	
+
 	prev := c.env
 	c.env = child
-	
+
 	var actualRet Type = TUnit{}
 	if e.Body.Expr != nil {
 		actualRet = c.checkExpr(e.Body.Expr)
@@ -974,16 +976,16 @@ func (c *checker) checkFnLit(e *ast.FnLit, inferredParams []Type) Type {
 		// Just check block without capturing a return value for now (unless we trace ReturnStmts)
 		c.checkBlock(e.Body.Block)
 	}
-	
+
 	c.env = prev
-	
+
 	ret := Type(TUnit{})
 	if e.ReturnType != "" {
 		ret = c.resolveTypeName(e.Pos, e.ReturnType)
 	} else {
 		ret = actualRet // Infer return type from expression body
 	}
-	
+
 	return TFun{Params: paramTypes, Ret: ret}
 }
 
@@ -1091,18 +1093,18 @@ func (c *checker) checkCall(e *ast.CallExpr) Type {
 			return TStream{Elem: TUnknown{}}
 		}
 		argT := c.checkExpr(e.Args[0])
-		
+
 		elemType := Type(TUnknown{})
 		if st, ok := argT.(TStream); ok {
 			elemType = st.Elem
 		} else {
 			c.errorAt(e.Pos, "map requires a stream as first argument, got %s", argT)
 		}
-		
+
 		retType := Type(TUnknown{})
 		if fnLit, ok := e.Args[1].(*ast.FnLit); ok {
 			ct := c.checkFnLit(fnLit, []Type{elemType})
-			c.exprTypes[fnLit] = ct 
+			c.exprTypes[fnLit] = ct
 			retType = ct.(TFun).Ret
 		} else {
 			closureT := c.checkExpr(e.Args[1])
@@ -1117,14 +1119,14 @@ func (c *checker) checkCall(e *ast.CallExpr) Type {
 			return TStream{Elem: TUnknown{}}
 		}
 		argT := c.checkExpr(e.Args[0])
-		
+
 		elemType := Type(TUnknown{})
 		if st, ok := argT.(TStream); ok {
 			elemType = st.Elem
 		} else {
 			c.errorAt(e.Pos, "filter requires a stream as first argument, got %s", argT)
 		}
-		
+
 		if fnLit, ok := e.Args[1].(*ast.FnLit); ok {
 			ct := c.checkFnLit(fnLit, []Type{elemType})
 			c.exprTypes[fnLit] = ct
@@ -1293,17 +1295,17 @@ func (c *checker) resolveTypeName(pos ast.Position, name string) Type {
 	if name == "" {
 		return TUnknown{}
 	}
-	
+
 	if strings.HasPrefix(name, "*volatile ") {
 		elemType := c.resolveTypeName(pos, name[10:])
 		return TVolatilePointer{Elem: elemType}
 	}
-	
+
 	if strings.HasPrefix(name, "*") {
 		elemType := c.resolveTypeName(pos, name[1:])
 		return TPointer{Elem: elemType}
 	}
-	
+
 	// Check for generic variables in scope
 	if c.typeParams != nil && c.typeParams[name] {
 		return TGenericVar{Name: name}
@@ -1315,12 +1317,12 @@ func (c *checker) resolveTypeName(pos ast.Position, name string) Type {
 		baseName := name[:idx]
 		argsStr := name[idx+1 : len(name)-1]
 		argStrs := splitTypeArgs(argsStr)
-		
+
 		var typeArgs []Type
 		for _, argStr := range argStrs {
 			typeArgs = append(typeArgs, c.resolveTypeName(pos, argStr))
 		}
-		
+
 		baseType := c.resolveTypeName(pos, baseName)
 		if _, ok := baseType.(TChan); ok && len(typeArgs) == 1 {
 			return TChan{Elem: typeArgs[0]}

@@ -137,7 +137,12 @@ func (g *Generator) Generate(prog *Program) string {
 
 	// Global variables
 	for _, gvar := range prog.GlobalVars {
-		out.WriteString(fmt.Sprintf("@%s = global i64 %d, align 8\n", gvar.Name, gvar.Value))
+		storageTy := g.globalStorageType(gvar.Type)
+		if gvar.ZeroInit {
+			out.WriteString(fmt.Sprintf("@%s = global %s zeroinitializer, align 8\n", gvar.Name, storageTy))
+		} else {
+			out.WriteString(fmt.Sprintf("@%s = global %s %d, align 8\n", gvar.Name, storageTy, gvar.Value))
+		}
 	}
 	if len(prog.GlobalVars) > 0 {
 		out.WriteString("\n")
@@ -148,7 +153,7 @@ func (g *Generator) Generate(prog *Program) string {
 		out.WriteString(externDecl(name))
 		out.WriteString("\n")
 	}
-	
+
 	// User-defined Extern declarations
 	for _, ext := range prog.Externs {
 		out.WriteString("declare " + g.llvmType(ext.ReturnType) + " @" + ext.Name + "(")
@@ -195,7 +200,7 @@ func (g *Generator) genFunc(fn *FuncDecl, globals []*GlobalVarDecl) string {
 	g.labelCount = 1
 	g.scope = map[string]scopedVar{}
 	for _, gvar := range globals {
-		g.scope[gvar.Name] = scopedVar{ty: TypeInt, llvmName: "@" + gvar.Name}
+		g.scope[gvar.Name] = scopedVar{ty: gvar.Type, llvmName: "@" + gvar.Name}
 	}
 
 	var out strings.Builder
@@ -356,7 +361,7 @@ func (g *Generator) genAssign(s *AssignStmt) string {
 	var out strings.Builder
 	valIR, valReg, valTy := g.genExpr(s.Value, &out)
 	out.WriteString(valIR)
-	
+
 	v, ok := g.scope[s.Name]
 	if !ok {
 		panic(fmt.Sprintf("codegen: undefined variable %q in assignment", s.Name))
@@ -428,10 +433,10 @@ func (g *Generator) genSpawn(s *SpawnStmt) string {
 	g.declaredExterns["free"] = true
 
 	var out strings.Builder
-	
+
 	argTypes := []Type{}
 	argRegs := []string{}
-	
+
 	for _, a := range s.Call.Args {
 		ir, reg, ty := g.genExpr(a, &out)
 		out.WriteString(ir)
@@ -443,20 +448,22 @@ func (g *Generator) genSpawn(s *SpawnStmt) string {
 	var llvmStructType strings.Builder
 	llvmStructType.WriteString("{ ")
 	for i, ty := range argTypes {
-		if i > 0 { llvmStructType.WriteString(", ") }
+		if i > 0 {
+			llvmStructType.WriteString(", ")
+		}
 		llvmStructType.WriteString(g.llvmType(ty))
 	}
 	llvmStructType.WriteString(" }")
-	
+
 	sizePtrReg := g.newTemp()
 	sizeReg := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = getelementptr %s, ptr null, i32 1\n", sizePtrReg, llvmStructType.String()))
 	out.WriteString(fmt.Sprintf("  %s = ptrtoint ptr %s to i64\n", sizeReg, sizePtrReg))
-	
+
 	// Allocate struct
 	argsPtrReg := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = call ptr @malloc(i64 %s)\n", argsPtrReg, sizeReg))
-	
+
 	// Store arguments
 	for i, reg := range argRegs {
 		fieldPtrReg := g.newTemp()
@@ -475,7 +482,7 @@ func (g *Generator) genSpawn(s *SpawnStmt) string {
 	var tramp strings.Builder
 	tramp.WriteString(fmt.Sprintf("\ndefine ptr @%s(ptr %%args) {\n", trampName))
 	tramp.WriteString("entry:\n")
-	
+
 	callArgs := []string{}
 	for i, ty := range argTypes {
 		fieldPtrReg := fmt.Sprintf("%%field.ptr.%d", i)
@@ -484,12 +491,12 @@ func (g *Generator) genSpawn(s *SpawnStmt) string {
 		tramp.WriteString(fmt.Sprintf("  %s = load %s, ptr %s\n", fieldValReg, g.llvmType(ty), fieldPtrReg))
 		callArgs = append(callArgs, fmt.Sprintf("%s %s", g.llvmType(ty), fieldValReg))
 	}
-	
+
 	tramp.WriteString(fmt.Sprintf("  call %s @%s(%s)\n", g.llvmType(TypeVoid), s.Call.Callee, strings.Join(callArgs, ", ")))
 	tramp.WriteString("  call void @free(ptr %args)\n")
 	tramp.WriteString("  ret ptr null\n")
 	tramp.WriteString("}\n")
-	
+
 	g.trampolines.WriteString(tramp.String())
 
 	return out.String()
@@ -498,18 +505,18 @@ func (g *Generator) genSpawn(s *SpawnStmt) string {
 func (g *Generator) genChanSend(s *ChanSendStmt) string {
 	g.declaredExterns["whale_chan_send"] = true
 	var out strings.Builder
-	
+
 	chIR, chReg, _ := g.genExpr(s.Chan, &out)
 	out.WriteString(chIR)
-	
+
 	valIR, valReg, _ := g.genExpr(s.Value, &out)
 	out.WriteString(valIR)
-	
+
 	// whale_chan_send(ptr ch, i64 val)
 	// We're passing the value as i64. For pointers, we'd theoretically need a bitcast to ptrtoint,
 	// but test_spawn.wh only uses int over channels, so this MVP implementation relies on the C runtime handling it.
 	out.WriteString(fmt.Sprintf("  call void @whale_chan_send(ptr %s, i64 %s)\n", chReg, valReg))
-	
+
 	return out.String()
 }
 
@@ -576,13 +583,13 @@ func (g *Generator) genIf(s *IfStmt) (string, bool) {
 
 func (g *Generator) genArena(s *ArenaStmt) (string, bool) {
 	var out strings.Builder
-	
+
 	g.declaredExterns["whale_arena_push"] = true
 	out.WriteString("  call void @whale_arena_push()\n")
-	
+
 	blockIR, term := g.genBlock(s.Body)
 	out.WriteString(blockIR)
-	
+
 	// If the block didn't unconditionally terminate (e.g., didn't return), we must pop.
 	// If it DID terminate (e.g. `return`), we still need to pop before it returned!
 	// Wait, if it returned inside the block, the pop should have happened before the ret instruction.
@@ -591,7 +598,7 @@ func (g *Generator) genArena(s *ArenaStmt) (string, bool) {
 		g.declaredExterns["whale_arena_pop"] = true
 		out.WriteString("  call void @whale_arena_pop()\n")
 	}
-	
+
 	return out.String(), term
 }
 
@@ -662,6 +669,9 @@ func (g *Generator) genExpr(e Expr, out *strings.Builder) (string, string, Type)
 		v, ok := g.scope[ex.Name]
 		if !ok {
 			panic(fmt.Sprintf("codegen: undefined variable %q", ex.Name))
+		}
+		if strings.HasPrefix(v.llvmName, "@") && (strings.HasPrefix(string(v.ty), "[") || g.structs[string(v.ty)] != nil || strings.HasPrefix(string(v.ty), "%enum.")) {
+			return "", v.llvmName, Type("*" + string(v.ty))
 		}
 		reg := g.newTemp()
 		out.WriteString(fmt.Sprintf("  %s = load %s, ptr %s\n", reg, g.llvmType(v.ty), v.llvmName))
@@ -755,7 +765,7 @@ func (g *Generator) genExpr(e Expr, out *strings.Builder) (string, string, Type)
 		return "", val, typ
 
 	case *CastExpr:
-		
+
 		_, srcReg, srcTy := g.genExpr(ex.Expr, out)
 		dstTy := g.parseCastType(ex.TargetTy)
 		dstLLVM := g.llvmType(dstTy)
@@ -763,9 +773,9 @@ func (g *Generator) genExpr(e Expr, out *strings.Builder) (string, string, Type)
 		dstBits := g.typeBits(dstTy)
 		reg := g.newTemp()
 		var instr string
-		
+
 		srcLLVM := g.llvmType(srcTy)
-		
+
 		if srcLLVM == "ptr" && dstLLVM == "i64" {
 			instr = fmt.Sprintf("  %s = ptrtoint ptr %s to i64\n", reg, srcReg)
 		} else if srcLLVM == "i64" && dstLLVM == "ptr" {
@@ -783,12 +793,12 @@ func (g *Generator) genExpr(e Expr, out *strings.Builder) (string, string, Type)
 				instr = fmt.Sprintf("  %s = bitcast %s %s to %s\n", reg, srcLLVM, srcReg, dstLLVM)
 			}
 		}
-		
+
 		out.WriteString(instr)
 		return "", reg, dstTy
 
 	case *AsmExpr:
-		
+
 		reg := g.newTemp()
 		clobStr := ""
 		if len(ex.Clobbers) > 0 {
@@ -825,7 +835,6 @@ func (g *Generator) genCall(ex *CallExpr, out *strings.Builder) (string, string,
 		return g.genPrintCall(ex, out)
 	}
 
-	
 	argRegs := make([]string, len(ex.Args))
 	argTypes := make([]Type, len(ex.Args))
 	for i, a := range ex.Args {
@@ -851,7 +860,7 @@ func (g *Generator) genCall(ex *CallExpr, out *strings.Builder) (string, string,
 			op = "fadd"
 		}
 		out.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(argTypes[0]), argRegs[0], argRegs[1]))
-				return "", reg, retTy
+		return "", reg, retTy
 	case "vec_mul":
 		retTy = argTypes[0]
 		reg := g.newTemp()
@@ -860,28 +869,82 @@ func (g *Generator) genCall(ex *CallExpr, out *strings.Builder) (string, string,
 			op = "fmul"
 		}
 		out.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(argTypes[0]), argRegs[0], argRegs[1]))
-				return "", reg, retTy
-	case "read_file": calleeName = "whale_read_file"; retTy = TypeString; g.declaredExterns[calleeName] = true
-	case "write_file": calleeName = "whale_write_file"; retTy = TypeVoid; g.declaredExterns[calleeName] = true
-	case "lines": calleeName = "whale_lines"; retTy = Type("[string]"); g.declaredExterns[calleeName] = true
-	case "split": calleeName = "whale_split"; retTy = Type("[string]"); g.declaredExterns[calleeName] = true
-	case "trim": calleeName = "whale_trim"; retTy = TypeString; g.declaredExterns[calleeName] = true
-	case "replace": calleeName = "whale_replace"; retTy = TypeString; g.declaredExterns[calleeName] = true
-	case "to_lower": calleeName = "whale_to_lower"; retTy = TypeString; g.declaredExterns[calleeName] = true
-	case "to_upper": calleeName = "whale_to_upper"; retTy = TypeString; g.declaredExterns[calleeName] = true
+		return "", reg, retTy
+	case "read_file":
+		calleeName = "whale_read_file"
+		retTy = TypeString
+		g.declaredExterns[calleeName] = true
+	case "write_file":
+		calleeName = "whale_write_file"
+		retTy = TypeVoid
+		g.declaredExterns[calleeName] = true
+	case "lines":
+		calleeName = "whale_lines"
+		retTy = Type("[string]")
+		g.declaredExterns[calleeName] = true
+	case "split":
+		calleeName = "whale_split"
+		retTy = Type("[string]")
+		g.declaredExterns[calleeName] = true
+	case "trim":
+		calleeName = "whale_trim"
+		retTy = TypeString
+		g.declaredExterns[calleeName] = true
+	case "replace":
+		calleeName = "whale_replace"
+		retTy = TypeString
+		g.declaredExterns[calleeName] = true
+	case "to_lower":
+		calleeName = "whale_to_lower"
+		retTy = TypeString
+		g.declaredExterns[calleeName] = true
+	case "to_upper":
+		calleeName = "whale_to_upper"
+		retTy = TypeString
+		g.declaredExterns[calleeName] = true
 	case "abs":
-		if argTypes[0] == TypeFloat { calleeName = "whale_abs_f"; retTy = TypeFloat } else { calleeName = "whale_abs_i"; retTy = TypeInt }
+		if argTypes[0] == TypeFloat {
+			calleeName = "whale_abs_f"
+			retTy = TypeFloat
+		} else {
+			calleeName = "whale_abs_i"
+			retTy = TypeInt
+		}
 		g.declaredExterns[calleeName] = true
 	case "max":
-		if argTypes[0] == TypeFloat { calleeName = "whale_max_f"; retTy = TypeFloat } else { calleeName = "whale_max_i"; retTy = TypeInt }
+		if argTypes[0] == TypeFloat {
+			calleeName = "whale_max_f"
+			retTy = TypeFloat
+		} else {
+			calleeName = "whale_max_i"
+			retTy = TypeInt
+		}
 		g.declaredExterns[calleeName] = true
 	case "min":
-		if argTypes[0] == TypeFloat { calleeName = "whale_min_f"; retTy = TypeFloat } else { calleeName = "whale_min_i"; retTy = TypeInt }
+		if argTypes[0] == TypeFloat {
+			calleeName = "whale_min_f"
+			retTy = TypeFloat
+		} else {
+			calleeName = "whale_min_i"
+			retTy = TypeInt
+		}
 		g.declaredExterns[calleeName] = true
-	case "parse_int": calleeName = "whale_parse_int"; retTy = TypeInt; g.declaredExterns[calleeName] = true
-	case "push": calleeName = "whale_push"; retTy = argTypes[0]; g.declaredExterns[calleeName] = true
-	case "pop": calleeName = "whale_pop"; retTy = argTypes[0]; g.declaredExterns[calleeName] = true
-	case "make_chan": calleeName = "whale_chan_new"; retTy = Type("chan"); g.declaredExterns[calleeName] = true
+	case "parse_int":
+		calleeName = "whale_parse_int"
+		retTy = TypeInt
+		g.declaredExterns[calleeName] = true
+	case "push":
+		calleeName = "whale_push"
+		retTy = argTypes[0]
+		g.declaredExterns[calleeName] = true
+	case "pop":
+		calleeName = "whale_pop"
+		retTy = argTypes[0]
+		g.declaredExterns[calleeName] = true
+	case "make_chan":
+		calleeName = "whale_chan_new"
+		retTy = Type("chan")
+		g.declaredExterns[calleeName] = true
 	}
 
 	reg := g.newTemp()
@@ -893,10 +956,10 @@ func (g *Generator) genChanRecv(ex *ChanRecvExpr, out *strings.Builder) (string,
 	g.declaredExterns["whale_chan_recv"] = true
 	var body strings.Builder
 	_, chReg, _ := g.genExpr(ex.Chan, &body)
-	
+
 	valReg := g.newTemp()
 	body.WriteString(fmt.Sprintf("  %s = call i64 @whale_chan_recv(ptr %s)\n", valReg, chReg))
-	
+
 	// Assume we are receiving int64 for MVP.
 	return "", valReg, TypeInt
 }
@@ -904,23 +967,26 @@ func (g *Generator) genChanRecv(ex *ChanRecvExpr, out *strings.Builder) (string,
 // genPrintCall lowers print(x) to a call to libc's printf.
 func (g *Generator) genPrintCall(ex *CallExpr, out *strings.Builder) (string, string, Type) {
 	g.declaredExterns["printf"] = true
-	
-	
+
 	var fmtStr strings.Builder
 	argRegs := []string{}
 	argTypes := []Type{}
-	
+
 	for _, arg := range ex.Args {
 		_, argReg, argTy := g.genExpr(arg, out)
 		argRegs = append(argRegs, argReg)
 		argTypes = append(argTypes, argTy)
-		
+
 		switch argTy {
-		case TypeInt: fmtStr.WriteString("%ld")
-		case TypeFloat: fmtStr.WriteString("%f")
-		case TypeBool: fmtStr.WriteString("%d")
-		case TypeString: fmtStr.WriteString("%s")
-		default: 
+		case TypeInt:
+			fmtStr.WriteString("%ld")
+		case TypeFloat:
+			fmtStr.WriteString("%f")
+		case TypeBool:
+			fmtStr.WriteString("%d")
+		case TypeString:
+			fmtStr.WriteString("%s")
+		default:
 			if strings.HasPrefix(string(argTy), "u") {
 				fmtStr.WriteString("%u") // Unsigned integer print format
 			} else {
@@ -929,7 +995,7 @@ func (g *Generator) genPrintCall(ex *CallExpr, out *strings.Builder) (string, st
 		}
 	}
 	fmtStr.WriteString("\n")
-	
+
 	fmtGlobal, fmtLen := g.internString(fmtStr.String())
 	fmtPtrReg := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds [%d x i8], ptr %s, i64 0, i64 0\n", fmtPtrReg, fmtLen, fmtGlobal))
@@ -939,7 +1005,7 @@ func (g *Generator) genPrintCall(ex *CallExpr, out *strings.Builder) (string, st
 	for i, reg := range argRegs {
 		callArgs.WriteString(fmt.Sprintf(", %s %s", g.llvmType(argTypes[i]), reg))
 	}
-	
+
 	resultReg := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = call i32 (ptr, ...) @printf(%s)\n", resultReg, callArgs.String()))
 	return "", resultReg, TypeInt
@@ -964,7 +1030,7 @@ func (g *Generator) genStructLit(node *StructLit, out *strings.Builder) (string,
 	for i, param := range structDecl.Fields {
 		_, valReg, valTy := g.genExpr(node.Fields[param.Name], out)
 		targetTy := param.Type
-		
+
 		// If storing into a bit-width integer, we might need to truncate i64 down to iN
 		if valTy == TypeInt && strings.HasPrefix(string(targetTy), "u") {
 			truncReg := g.newTemp()
@@ -983,10 +1049,10 @@ func (g *Generator) genStructLit(node *StructLit, out *strings.Builder) (string,
 func (g *Generator) genConstructEnum(ex *ConstructEnumExpr, out *strings.Builder) (string, string, Type) {
 	ptr := g.newTemp()
 	enumTypeStr := "%enum." + ex.EnumName
-	
+
 	// Enums are usually returned as ptr, but structs are usually passed by allocating a temporary.
 	out.WriteString(fmt.Sprintf("  %s = alloca %s\n", ptr, enumTypeStr))
-	
+
 	enumDecl := g.enums[ex.EnumName]
 	tagIndex := 0
 	var payloadType Type = ""
@@ -997,12 +1063,12 @@ func (g *Generator) genConstructEnum(ex *ConstructEnumExpr, out *strings.Builder
 			break
 		}
 	}
-	
+
 	// Store tag
 	tagPtr := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds %s, ptr %s, i32 0, i32 0\n", tagPtr, enumTypeStr, ptr))
 	out.WriteString(fmt.Sprintf("  store i32 %d, ptr %s\n", tagIndex, tagPtr))
-	
+
 	// Store payload
 	if ex.Payload != nil {
 		_, pReg, _ := g.genExpr(ex.Payload, out)
@@ -1015,42 +1081,42 @@ func (g *Generator) genConstructEnum(ex *ConstructEnumExpr, out *strings.Builder
 				payloadFieldIndex++
 			}
 		}
-		
+
 		payloadPtr := g.newTemp()
 		out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds %s, ptr %s, i32 0, i32 %d\n", payloadPtr, enumTypeStr, ptr, payloadFieldIndex))
 		out.WriteString(fmt.Sprintf("  store %s %s, ptr %s\n", g.llvmType(payloadType), pReg, payloadPtr))
 	}
-	
+
 	return "", ptr, Type(ex.EnumName)
 }
 
 func (g *Generator) genMatchExpr(ex *MatchExpr, out *strings.Builder) (string, string, Type) {
 	_, ptrReg, enumTy := g.genExpr(ex.Expr, out)
-	
+
 	enumName := string(enumTy)
 	enumDecl := g.enums[enumName]
 	enumTypeStr := "%enum." + enumName
-	
+
 	// Load the tag
 	tagPtr := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds %s, ptr %s, i32 0, i32 0\n", tagPtr, enumTypeStr, ptrReg))
-	
+
 	tagReg := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = load i32, ptr %s\n", tagReg, tagPtr))
-	
+
 	// Generate basic blocks for branches
 	var armBlocks []string
 	var phiBlocks []string
 	var phiRegs []string
-	
+
 	defaultBlock := g.newLabel("match.default")
 	endBlock := g.newLabel("match.end")
-	
+
 	out.WriteString(fmt.Sprintf("  switch i32 %s, label %%%s [\n", tagReg, defaultBlock))
-	
+
 	hasCatchAll := false
 	var catchAllBlock string
-	
+
 	// First pass: generate the switch table
 	for _, arm := range ex.Arms {
 		if arm.IsCatchAll {
@@ -1070,7 +1136,7 @@ func (g *Generator) genMatchExpr(ex *MatchExpr, out *strings.Builder) (string, s
 		}
 	}
 	out.WriteString("  ]\n\n")
-	
+
 	// Generate Default block
 	out.WriteString(defaultBlock + ":\n")
 	if hasCatchAll {
@@ -1078,9 +1144,9 @@ func (g *Generator) genMatchExpr(ex *MatchExpr, out *strings.Builder) (string, s
 	} else {
 		out.WriteString("  unreachable\n\n")
 	}
-	
+
 	var unifiedType Type = TypeVoid
-	
+
 	// Generate Arms
 	armIdx := 0
 	for _, arm := range ex.Arms {
@@ -1091,9 +1157,9 @@ func (g *Generator) genMatchExpr(ex *MatchExpr, out *strings.Builder) (string, s
 			block = armBlocks[armIdx]
 			armIdx++
 		}
-		
+
 		out.WriteString(block + ":\n")
-		
+
 		if arm.Binding != "" && !arm.IsCatchAll {
 			var payloadType Type = ""
 			for _, v := range enumDecl.Variants {
@@ -1102,7 +1168,7 @@ func (g *Generator) genMatchExpr(ex *MatchExpr, out *strings.Builder) (string, s
 					break
 				}
 			}
-			
+
 			payloadFieldIndex := 1
 			for _, v := range enumDecl.Variants {
 				if v.Name == arm.Variant {
@@ -1112,47 +1178,47 @@ func (g *Generator) genMatchExpr(ex *MatchExpr, out *strings.Builder) (string, s
 					payloadFieldIndex++
 				}
 			}
-			
+
 			payloadPtr := g.newTemp()
 			out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds %s, ptr %s, i32 0, i32 %d\n", payloadPtr, enumTypeStr, ptrReg, payloadFieldIndex))
-			
+
 			payloadReg := g.newTemp()
 			out.WriteString(fmt.Sprintf("  %s = load %s, ptr %s\n", payloadReg, g.llvmType(payloadType), payloadPtr))
-			
+
 			bindingPtr := g.newTemp()
 			out.WriteString(fmt.Sprintf("  %s = alloca %s\n", bindingPtr, g.llvmType(payloadType)))
 			out.WriteString(fmt.Sprintf("  store %s %s, ptr %s\n", g.llvmType(payloadType), payloadReg, bindingPtr))
-			
+
 			g.scope[arm.Binding] = scopedVar{llvmName: bindingPtr, ty: payloadType}
 		}
-		
+
 		_, bodyReg, bodyTy := g.genExpr(arm.Body, out)
-		
+
 		if arm.Binding != "" {
 			delete(g.scope, arm.Binding)
 		}
-		
+
 		exitBlock := g.newLabel("match.arm.exit")
 		out.WriteString(fmt.Sprintf("  br label %%%s\n\n", exitBlock))
 		out.WriteString(exitBlock + ":\n")
-		
+
 		if bodyTy != TypeVoid {
 			phiRegs = append(phiRegs, bodyReg)
 			phiBlocks = append(phiBlocks, exitBlock)
 			unifiedType = bodyTy
 		}
-		
+
 		out.WriteString(fmt.Sprintf("  br label %%%s\n\n", endBlock))
 	}
-	
+
 	// Generate end block
 	out.WriteString(endBlock + ":\n")
-	
+
 	resultReg := ""
 	if unifiedType != TypeVoid && len(phiRegs) > 0 {
 		resultReg = g.newTemp()
 		out.WriteString(fmt.Sprintf("  %s = phi %s ", resultReg, g.llvmType(unifiedType)))
-		
+
 		for i := 0; i < len(phiRegs); i++ {
 			if i > 0 {
 				out.WriteString(", ")
@@ -1161,13 +1227,15 @@ func (g *Generator) genMatchExpr(ex *MatchExpr, out *strings.Builder) (string, s
 		}
 		out.WriteString("\n")
 	}
-	
+
 	return "", resultReg, unifiedType
 }
 
 func (g *Generator) genFieldAccess(node *FieldAccess, out *strings.Builder) (string, string, Type) {
 	_, objReg, objTy := g.genExpr(node.Object, out)
-	structDecl := g.structs[string(objTy)]
+	structName := string(objTy)
+	structName = strings.TrimPrefix(structName, "*")
+	structDecl := g.structs[structName]
 
 	fieldIdx := 0
 	var fieldTy Type
@@ -1179,7 +1247,7 @@ func (g *Generator) genFieldAccess(node *FieldAccess, out *strings.Builder) (str
 	}
 
 	fieldPtrReg := g.newTemp()
-	out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds %%struct.%s, ptr %s, i32 0, i32 %d\n", fieldPtrReg, string(objTy), objReg, fieldIdx))
+	out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds %%struct.%s, ptr %s, i32 0, i32 %d\n", fieldPtrReg, structName, objReg, fieldIdx))
 	valReg := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = load %s, ptr %s\n", valReg, g.llvmType(fieldTy), fieldPtrReg))
 	return "", valReg, fieldTy
@@ -1209,7 +1277,7 @@ func (g *Generator) genListLit(node *ListLit, out *strings.Builder) (string, str
 	elemLlvmTy := g.llvmType(node.ElementType)
 	out.WriteString(fmt.Sprintf("  %s = getelementptr %s, ptr null, i32 1\n", dataSizePtrReg, elemLlvmTy))
 	out.WriteString(fmt.Sprintf("  %s = ptrtoint ptr %s to i64\n", dataSizeReg, dataSizePtrReg))
-	
+
 	totalBytesReg := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = mul i64 %s, %d\n", totalBytesReg, dataSizeReg, length))
 	dataPtrReg := g.newTemp()
@@ -1280,7 +1348,7 @@ func (g *Generator) genAllocArray(node *AllocArray, out *strings.Builder) (strin
 	elemLlvmTy := g.llvmType(node.ElementType)
 	out.WriteString(fmt.Sprintf("  %s = getelementptr %s, ptr null, i32 1\n", dataSizePtrReg, elemLlvmTy))
 	out.WriteString(fmt.Sprintf("  %s = ptrtoint ptr %s to i64\n", dataSizeReg, dataSizePtrReg))
-	
+
 	totalBytesReg := g.newTemp()
 	out.WriteString(fmt.Sprintf("  %s = mul i64 %s, %s\n", totalBytesReg, dataSizeReg, lenReg))
 	dataPtrReg := g.newTemp()
@@ -1401,9 +1469,9 @@ func (g *Generator) llvmType(t Type) string {
 			return "ptr"
 		}
 		if strings.HasPrefix(string(t), "vec256<") && strings.HasSuffix(string(t), ">") {
-			elemTyStr := string(t)[7:len(string(t))-1]
+			elemTyStr := string(t)[7 : len(string(t))-1]
 			elemLlvmTy := g.llvmType(Type(elemTyStr))
-			
+
 			// Compute element size to calculate vector length
 			var bits int
 			if elemLlvmTy == "i64" || elemLlvmTy == "double" {
@@ -1413,7 +1481,7 @@ func (g *Generator) llvmType(t Type) string {
 					bits = b
 				}
 			}
-			
+
 			if bits > 0 {
 				length := 256 / bits
 				return fmt.Sprintf("<%d x %s>", length, elemLlvmTy)
@@ -1436,6 +1504,19 @@ func (g *Generator) llvmType(t Type) string {
 			return "i64"
 		}
 		panic(fmt.Sprintf("codegen: unhandled Type %s", t))
+	}
+}
+
+func (g *Generator) globalStorageType(t Type) string {
+	switch {
+	case strings.HasPrefix(string(t), "["):
+		return "%WhaleArray"
+	case g.structs[string(t)] != nil:
+		return "%struct." + string(t)
+	case g.enums[string(t)] != nil:
+		return "%enum." + string(t)
+	default:
+		return g.llvmType(t)
 	}
 }
 
@@ -1627,17 +1708,26 @@ func isComparisonOp(op string) bool {
 }
 
 func (g *Generator) parseCastType(ty string) Type {
-	if ty == "int" { return TypeInt }
-	if ty == "float" { return TypeFloat }
-	if ty == "bool" { return TypeBool }
+	if ty == "int" {
+		return TypeInt
+	}
+	if ty == "float" {
+		return TypeFloat
+	}
+	if ty == "bool" {
+		return TypeBool
+	}
 	return Type(ty)
 }
 
 func (g *Generator) typeBits(t Type) int {
 	switch t {
-	case TypeInt: return 64
-	case TypeBool: return 1
-	case TypeFloat: return 64 // double
+	case TypeInt:
+		return 64
+	case TypeBool:
+		return 1
+	case TypeFloat:
+		return 64 // double
 	}
 	s := string(t)
 	if strings.HasPrefix(s, "u") || strings.HasPrefix(s, "i") {

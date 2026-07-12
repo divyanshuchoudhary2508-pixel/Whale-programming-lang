@@ -29,8 +29,10 @@ type Program struct {
 }
 
 type GlobalVarDecl struct {
-	Name  string
-	Value int64
+	Name     string
+	Type     Type
+	Value    int64
+	ZeroInit bool
 }
 
 // StructDecl: struct Name { Fields... }
@@ -152,20 +154,20 @@ type AssignIndexStmt struct {
 	Value Expr
 }
 
-func (*LetStmt) stmtNode()         {}
-func (*ReturnStmt) stmtNode()      {}
-func (*IfStmt) stmtNode()          {}
-func (*ExprStmt) stmtNode()        {}
-func (*WhileStmt) stmtNode()       {}
-func (*BreakStmt) stmtNode()       {}
-func (*ContinueStmt) stmtNode()    {}
-func (*AssignStmt) stmtNode()      {}
-func (*AssignFieldStmt) stmtNode() {}
+func (*LetStmt) stmtNode()               {}
+func (*ReturnStmt) stmtNode()            {}
+func (*IfStmt) stmtNode()                {}
+func (*ExprStmt) stmtNode()              {}
+func (*WhileStmt) stmtNode()             {}
+func (*BreakStmt) stmtNode()             {}
+func (*ContinueStmt) stmtNode()          {}
+func (*AssignStmt) stmtNode()            {}
+func (*AssignFieldStmt) stmtNode()       {}
 func (*AssignDereferenceStmt) stmtNode() {}
-func (*AssignIndexStmt) stmtNode() {}
-func (*SpawnStmt) stmtNode()       {}
-func (*ChanSendStmt) stmtNode()    {}
-func (*ArenaStmt) stmtNode()       {}
+func (*AssignIndexStmt) stmtNode()       {}
+func (*SpawnStmt) stmtNode()             {}
+func (*ChanSendStmt) stmtNode()          {}
+func (*ArenaStmt) stmtNode()             {}
 
 // SpawnStmt: spawn call
 type SpawnStmt struct {
@@ -223,7 +225,7 @@ type MatchArm struct {
 	Variant    string
 	Binding    string // empty if no payload binding
 	Body       Expr
-	IsCatchAll bool   // true if `_ =>`
+	IsCatchAll bool // true if `_ =>`
 }
 
 // ConstructEnumExpr: Name(Payload)
@@ -268,7 +270,7 @@ func (*IntLit) exprNode()      {}
 func (*FloatLit) exprNode()    {}
 func (*BoolLit) exprNode()     {}
 func (*StringLit) exprNode()   {}
-func (*Ident) exprNode()         {}
+func (*Ident) exprNode()       {}
 func (*BinaryExpr) exprNode()  {}
 func (*CallExpr) exprNode()    {}
 func (*StructLit) exprNode()   {}
@@ -297,19 +299,19 @@ type AllocArray struct {
 	Length      Expr
 }
 
-func (*ListLit) exprNode()    {}
-func (*IndexExpr) exprNode()  {}
-func (*LenExpr) exprNode()      {}
-func (*AllocArray) exprNode()   {}
-func (*MatchExpr) exprNode()    {}
+func (*ListLit) exprNode()           {}
+func (*IndexExpr) exprNode()         {}
+func (*LenExpr) exprNode()           {}
+func (*AllocArray) exprNode()        {}
+func (*MatchExpr) exprNode()         {}
 func (*ConstructEnumExpr) exprNode() {}
 func (*ErrorLit) exprNode()          {}
 func (*TryExpr) exprNode()           {}
-func (*ChanRecvExpr) exprNode() {}
-func (*AddressOfExpr) exprNode() {}
-func (*DereferenceExpr) exprNode() {}
-func (*CastExpr) exprNode() {}
-func (*AsmExpr) exprNode() {}
+func (*ChanRecvExpr) exprNode()      {}
+func (*AddressOfExpr) exprNode()     {}
+func (*DereferenceExpr) exprNode()   {}
+func (*CastExpr) exprNode()          {}
+func (*AsmExpr) exprNode()           {}
 
 // ChanRecvExpr: <-chan
 type ChanRecvExpr struct {

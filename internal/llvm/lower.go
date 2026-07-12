@@ -55,19 +55,26 @@ func Lower(file *ast.File, typeMap map[ast.Expr]types.Type) (*Program, error) {
 				Variants: variants,
 			})
 		} else if letDecl, ok := stmt.(*ast.LetStmt); ok {
+			val, err := l.lowerExpr(letDecl.Value)
+			if err != nil {
+				return nil, err
+			}
+			typ := inferLoweredType(val)
+			global := &GlobalVarDecl{
+				Name:     letDecl.Name,
+				Type:     typ,
+				ZeroInit: true,
+			}
 			if intLit, ok := letDecl.Value.(*ast.IntLit); ok {
-				out.GlobalVars = append(out.GlobalVars, &GlobalVarDecl{
-					Name:  letDecl.Name,
-					Value: intLit.Value,
-				})
+				global.Value = intLit.Value
+				global.ZeroInit = false
 			} else if unary, ok := letDecl.Value.(*ast.UnaryOp); ok && unary.Op == "-" {
 				if intLit, ok := unary.Expr.(*ast.IntLit); ok {
-					out.GlobalVars = append(out.GlobalVars, &GlobalVarDecl{
-						Name:  letDecl.Name,
-						Value: -intLit.Value,
-					})
+					global.Value = -intLit.Value
+					global.ZeroInit = false
 				}
 			}
+			out.GlobalVars = append(out.GlobalVars, global)
 		}
 	}
 	for _, stmt := range file.Body {
@@ -151,20 +158,24 @@ func (l *lowerer) lowerStmts(stmts []ast.Stmt) ([]Stmt, error) {
 	for i, s := range stmts {
 		if ls, ok := s.(*ast.LetStmt); ok {
 			fused, ok, err := l.tryFusePipeline(ls.Name, ls.Value)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 			if ok {
 				out = append(out, fused...)
 				continue
 			}
 		} else if es, ok := s.(*ast.ExprStmt); ok {
 			fused, ok, err := l.tryFusePipeline(fmt.Sprintf("expr_%d", i), es.Expr)
-			if err != nil { return nil, err }
+			if err != nil {
+				return nil, err
+			}
 			if ok {
 				out = append(out, fused...)
 				continue
 			}
 		}
-		
+
 		ls, err := l.lowerStmt(s)
 		if err != nil {
 			return nil, err
@@ -188,7 +199,7 @@ func (l *lowerer) lowerStmt(s ast.Stmt) (Stmt, error) {
 		} else {
 			typ = inferLoweredType(val) // fallback
 		}
-		
+
 		if node.TypeAnn != "" {
 			t, err := lowerType(node.TypeAnn)
 			if err == nil {
@@ -315,9 +326,13 @@ func (l *lowerer) lowerStmt(s ast.Stmt) (Stmt, error) {
 		return &SpawnStmt{Call: &CallExpr{Callee: call.Name, Args: args}}, nil
 	case *ast.ChanSendStmt:
 		ch, err := l.lowerExpr(node.Chan)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		val, err := l.lowerExpr(node.Value)
-		if err != nil { return nil, err }
+		if err != nil {
+			return nil, err
+		}
 		return &ChanSendStmt{Chan: ch, Value: val}, nil
 	}
 	return nil, fmt.Errorf("unsupported statement type %T", s)
@@ -353,7 +368,7 @@ func (l *lowerer) lowerExpr(e ast.Expr) (Expr, error) {
 		if !ok {
 			return nil, fmt.Errorf("LLVM backend only supports calling by direct identifier")
 		}
-		
+
 		if enumName, ok := l.enums[ident.Name]; ok {
 			if len(node.Args) != 1 {
 				return nil, fmt.Errorf("enum variant %s expects exactly 1 payload argument", ident.Name)
@@ -364,7 +379,7 @@ func (l *lowerer) lowerExpr(e ast.Expr) (Expr, error) {
 			}
 			return &ConstructEnumExpr{EnumName: enumName, Variant: ident.Name, Payload: payload}, nil
 		}
-		
+
 		args := make([]Expr, len(node.Args))
 		for i, a := range node.Args {
 			arg, err := l.lowerExpr(a)
@@ -418,7 +433,7 @@ func (l *lowerer) lowerExpr(e ast.Expr) (Expr, error) {
 			}
 			values[i] = val
 		}
-		
+
 		elemType := TypeInt // Default
 		if len(values) > 0 {
 			elemType = inferLoweredType(values[0])
@@ -524,7 +539,7 @@ func inferLoweredType(val Expr) Type {
 		return TypeString
 	case *FieldAccess:
 		// Simplified: normally we'd look up the field type from the struct decl.
-		return TypeInt 
+		return TypeInt
 	case *ListLit:
 		// We encode array types as strings like "[int]" for this simplified compiler
 		return Type("[" + string(v.ElementType) + "]")
@@ -562,10 +577,14 @@ func (l *lowerer) tryFusePipeline(target string, expr ast.Expr) ([]Stmt, bool, e
 
 	for {
 		c, ok := curr.(*ast.CallExpr)
-		if !ok { return nil, false, fmt.Errorf("invalid pipeline") }
+		if !ok {
+			return nil, false, fmt.Errorf("invalid pipeline")
+		}
 		id, ok := c.Callee.(*ast.Ident)
-		if !ok { return nil, false, fmt.Errorf("invalid pipeline callee") }
-		
+		if !ok {
+			return nil, false, fmt.Errorf("invalid pipeline callee")
+		}
+
 		if id.Name == "stream" {
 			listExpr = c.Args[0]
 			break
@@ -584,15 +603,17 @@ func (l *lowerer) tryFusePipeline(target string, expr ast.Expr) ([]Stmt, bool, e
 
 	var out []Stmt
 	list, err := l.lowerExpr(listExpr)
-	if err != nil { return nil, false, err }
-	
+	if err != nil {
+		return nil, false, err
+	}
+
 	listTy := inferLoweredType(list)
 	elemTy := TypeInt
 	listTyStr := string(listTy)
 	if strings.HasPrefix(listTyStr, "[") {
 		elemTy = Type(listTyStr[1 : len(listTyStr)-1])
 	}
-	
+
 	srcName := "_src_" + target
 	lenName := "_len_" + target
 	iName := "_i_" + target
@@ -600,55 +621,59 @@ func (l *lowerer) tryFusePipeline(target string, expr ast.Expr) ([]Stmt, bool, e
 
 	out = append(out, &LetStmt{Name: srcName, Type: listTy, Value: list})
 	out = append(out, &LetStmt{Name: lenName, Type: TypeInt, Value: &LenExpr{List: &Ident{Name: srcName}}})
-	
+
 	outTy := elemTy
 	outArrTy := Type("[" + string(outTy) + "]")
-	
+
 	if !strings.HasPrefix(target, "expr_") {
 		out = append(out, &LetStmt{Name: target, Type: outArrTy, Value: &AllocArray{ElementType: outTy, Length: &Ident{Name: lenName}}})
 	}
 	out = append(out, &LetStmt{Name: iName, Type: TypeInt, Value: &IntLit{Value: 0}})
 	out = append(out, &LetStmt{Name: out_iName, Type: TypeInt, Value: &IntLit{Value: 0}})
-	
+
 	var loopBody []Stmt
 	itemName := "_item_" + target
 	loopBody = append(loopBody, &LetStmt{
-		Name: itemName,
-		Type: elemTy,
+		Name:  itemName,
+		Type:  elemTy,
 		Value: &IndexExpr{List: &Ident{Name: srcName}, Index: &Ident{Name: iName}},
 	})
-	
+
 	var pipelineStmts []Stmt
 	currVal := Expr(&Ident{Name: itemName})
-	
+
 	for i := 0; i < len(ops); i++ {
 		op := ops[i].(*ast.CallExpr)
 		opName := op.Callee.(*ast.Ident).Name
 		closure := op.Args[1].(*ast.FnLit)
 		paramName := closure.Params[0].Name
-		
+
 		pipelineStmts = append(pipelineStmts, &LetStmt{Name: paramName, Type: elemTy, Value: currVal})
-		
+
 		if opName == "map" {
 			mappedVal, err := l.lowerExpr(closure.Body.Expr)
-			if err != nil { return nil, false, err }
+			if err != nil {
+				return nil, false, err
+			}
 			currVal = mappedVal
 		} else if opName == "filter" {
 			filterCond, err := l.lowerExpr(closure.Body.Expr)
-			if err != nil { return nil, false, err }
-			
-			// For filter, the *rest* of the pipeline (including out assignment) 
+			if err != nil {
+				return nil, false, err
+			}
+
+			// For filter, the *rest* of the pipeline (including out assignment)
 			// must be wrapped in an IfStmt!
 			var restOps []ast.Expr
 			for j := i + 1; j < len(ops); j++ {
 				restOps = append(restOps, ops[j])
 			}
-			
+
 			// Recursively call a helper to process the rest?
 			// Actually, it's easier to just build the final assignment statements now
 			// and then wrap everything.
 			var innerStmts []Stmt
-			
+
 			// Map/Filter the rest:
 			var innerCurrVal Expr = currVal
 			for _, restOpExpr := range restOps {
@@ -656,77 +681,84 @@ func (l *lowerer) tryFusePipeline(target string, expr ast.Expr) ([]Stmt, bool, e
 				restOpName := restOp.Callee.(*ast.Ident).Name
 				restClosure := restOp.Args[1].(*ast.FnLit)
 				restParamName := restClosure.Params[0].Name
-				
+
 				innerStmts = append(innerStmts, &LetStmt{Name: restParamName, Type: elemTy, Value: innerCurrVal})
 				if restOpName == "map" {
 					mapped, err := l.lowerExpr(restClosure.Body.Expr)
-					if err != nil { return nil, false, err }
+					if err != nil {
+						return nil, false, err
+					}
 					innerCurrVal = mapped
 				} else if restOpName == "filter" {
 					panic("multiple filters in one pipeline not yet supported by basic fusion")
 				}
 			}
-			
+
 			if !strings.HasPrefix(target, "expr_") {
 				innerStmts = append(innerStmts, &AssignIndexStmt{
-					List: &Ident{Name: target},
+					List:  &Ident{Name: target},
 					Index: &Ident{Name: out_iName},
 					Value: innerCurrVal,
 				})
 			}
 			innerStmts = append(innerStmts, &AssignStmt{
-				Name: out_iName,
+				Name:  out_iName,
 				Value: &BinaryExpr{Op: "+", Left: &Ident{Name: out_iName}, Right: &IntLit{Value: 1}},
 			})
-			
+
 			pipelineStmts = append(pipelineStmts, &IfStmt{
 				Cond: filterCond,
 				Then: innerStmts,
 			})
-			
+
 			// We break because we processed the rest of the ops inside the IfStmt
-			currVal = nil 
+			currVal = nil
 			break
 		}
 	}
-	
+
 	if currVal != nil {
 		if !strings.HasPrefix(target, "expr_") {
 			pipelineStmts = append(pipelineStmts, &AssignIndexStmt{
-				List: &Ident{Name: target},
+				List:  &Ident{Name: target},
 				Index: &Ident{Name: out_iName},
 				Value: currVal,
 			})
 		}
 		pipelineStmts = append(pipelineStmts, &AssignStmt{
-			Name: out_iName,
+			Name:  out_iName,
 			Value: &BinaryExpr{Op: "+", Left: &Ident{Name: out_iName}, Right: &IntLit{Value: 1}},
 		})
 	}
-	
+
 	loopBody = append(loopBody, pipelineStmts...)
 	loopBody = append(loopBody, &AssignStmt{
-		Name: iName,
+		Name:  iName,
 		Value: &BinaryExpr{Op: "+", Left: &Ident{Name: iName}, Right: &IntLit{Value: 1}},
 	})
-	
+
 	out = append(out, &WhileStmt{
 		Cond: &BinaryExpr{Op: "<", Left: &Ident{Name: iName}, Right: &Ident{Name: lenName}},
 		Body: loopBody,
 	})
-	
+
 	return out, true, nil
 }
 
 func (l *lowerer) lowerTypeFromChecker(t types.Type) Type {
 	switch t := t.(type) {
-	case types.TInt: return TypeInt
-	case types.TFloat: return TypeFloat
-	case types.TBool: return TypeBool
-	case types.TStruct: return Type(t.Name)
-	case types.TList: return Type("[" + string(l.lowerTypeFromChecker(t.Elem)) + "]")
-	case types.TPointer: return Type("*" + string(l.lowerTypeFromChecker(t.Elem)))
+	case types.TInt:
+		return TypeInt
+	case types.TFloat:
+		return TypeFloat
+	case types.TBool:
+		return TypeBool
+	case types.TStruct:
+		return Type(t.Name)
+	case types.TList:
+		return Type("[" + string(l.lowerTypeFromChecker(t.Elem)) + "]")
+	case types.TPointer:
+		return Type("*" + string(l.lowerTypeFromChecker(t.Elem)))
 	}
 	return TypeInt // fallback
 }
-
