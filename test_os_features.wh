@@ -1,0 +1,33 @@
+fn test_volatile() -> int {
+    let ptr = 0xB8000 as *volatile u16;
+    *ptr = 0x0741 as u16;
+    return (*ptr) as int;
+}
+
+fn test_bitwise(a: int, b: int) -> int {
+    let or_res = a | b;
+    let and_res = a & b;
+    let xor_res = a ^ b;
+    let not_res = ~a;
+    let shl_res = a << 2;
+    let shr_res = b >> 1;
+    return or_res + and_res + xor_res + not_res + shl_res + shr_res;
+}
+
+fn test_cast(x: int) -> int {
+    let small = x as u8;
+    return small as int;
+}
+
+fn test_asm() -> int {
+    asm("nop", "memory");
+    return 0;
+}
+
+fn _start() -> int {
+    test_bitwise(5, 3);
+    test_cast(257);
+    test_volatile();
+    test_asm();
+    return 0;
+}

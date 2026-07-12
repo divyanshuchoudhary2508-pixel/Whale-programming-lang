@@ -11,11 +11,12 @@ import (
 type lowerer struct {
 	typeMap map[ast.Expr]types.Type
 	enums   map[string]string // Maps variant name to Enum Name
+	globals map[string]int64  // Maps global constant name to integer value
 }
 
 // Lower converts a Whale parser AST to an LLVM backend AST.
 func Lower(file *ast.File, typeMap map[ast.Expr]types.Type) (*Program, error) {
-	l := &lowerer{typeMap: typeMap, enums: make(map[string]string)}
+	l := &lowerer{typeMap: typeMap, enums: make(map[string]string), globals: make(map[string]int64)}
 	out := &Program{}
 	for _, stmt := range file.Body {
 		if structDecl, ok := stmt.(*ast.StructDecl); ok {
@@ -53,6 +54,20 @@ func Lower(file *ast.File, typeMap map[ast.Expr]types.Type) (*Program, error) {
 				Name:     enumDecl.Name,
 				Variants: variants,
 			})
+		} else if letDecl, ok := stmt.(*ast.LetStmt); ok {
+			if intLit, ok := letDecl.Value.(*ast.IntLit); ok {
+				out.GlobalVars = append(out.GlobalVars, &GlobalVarDecl{
+					Name:  letDecl.Name,
+					Value: intLit.Value,
+				})
+			} else if unary, ok := letDecl.Value.(*ast.UnaryOp); ok && unary.Op == "-" {
+				if intLit, ok := unary.Expr.(*ast.IntLit); ok {
+					out.GlobalVars = append(out.GlobalVars, &GlobalVarDecl{
+						Name:  letDecl.Name,
+						Value: -intLit.Value,
+					})
+				}
+			}
 		}
 	}
 	for _, stmt := range file.Body {
@@ -187,6 +202,16 @@ func (l *lowerer) lowerStmt(s ast.Stmt) (Stmt, error) {
 			return nil, err
 		}
 		return &AssignStmt{Name: node.Name, Value: val}, nil
+	case *ast.AssignDereferenceStmt:
+		ptr, err := l.lowerExpr(node.Pointer)
+		if err != nil {
+			return nil, err
+		}
+		val, err := l.lowerExpr(node.Value)
+		if err != nil {
+			return nil, err
+		}
+		return &AssignDereferenceStmt{Pointer: ptr, Value: val}, nil
 	case *ast.AssignFieldStmt:
 		obj, err := l.lowerExpr(node.Object)
 		if err != nil {
@@ -212,6 +237,12 @@ func (l *lowerer) lowerStmt(s ast.Stmt) (Stmt, error) {
 		}
 		return &AssignIndexStmt{List: list, Index: idx, Value: val}, nil
 	case *ast.ExprStmt:
+		if id, ok := node.Expr.(*ast.Ident); ok && id.Name == "break" {
+			return &BreakStmt{}, nil
+		}
+		if id, ok := node.Expr.(*ast.Ident); ok && id.Name == "continue" {
+			return &ContinueStmt{}, nil
+		}
 		val, err := l.lowerExpr(node.Expr)
 		if err != nil {
 			return nil, err
@@ -403,6 +434,18 @@ func (l *lowerer) lowerExpr(e ast.Expr) (Expr, error) {
 			return nil, err
 		}
 		return &IndexExpr{List: list, Index: idx}, nil
+	case *ast.AddressOfExpr:
+		expr, err := l.lowerExpr(node.Expr)
+		if err != nil {
+			return nil, err
+		}
+		return &AddressOfExpr{Expr: expr}, nil
+	case *ast.DereferenceExpr:
+		expr, err := l.lowerExpr(node.Expr)
+		if err != nil {
+			return nil, err
+		}
+		return &DereferenceExpr{Expr: expr}, nil
 	case *ast.ChanRecvExpr:
 		ch, err := l.lowerExpr(node.Chan)
 		if err != nil {
@@ -421,6 +464,29 @@ func (l *lowerer) lowerExpr(e ast.Expr) (Expr, error) {
 			return nil, err
 		}
 		return &TryExpr{Expr: expr}, nil
+	case *ast.CastExpr:
+		expr, err := l.lowerExpr(node.Expr)
+		if err != nil {
+			return nil, err
+		}
+		return &CastExpr{Expr: expr, TargetTy: node.TargetTy}, nil
+	case *ast.AsmExpr:
+		return &AsmExpr{Template: node.Template, Clobbers: node.Clobbers, SideEffect: node.SideEffect}, nil
+	case *ast.UnaryOp:
+		expr, err := l.lowerExpr(node.Expr)
+		if err != nil {
+			return nil, err
+		}
+		// Map unary ~ (bitwise not) to xor with -1
+		if node.Op == "~" {
+			return &BinaryExpr{Op: "^", Left: expr, Right: &IntLit{Value: -1}}, nil
+		}
+		// Map unary - to sub 0, x
+		if node.Op == "-" {
+			return &BinaryExpr{Op: "-", Left: &IntLit{Value: 0}, Right: expr}, nil
+		}
+		// Map ! to xor with 1 (boolean not)
+		return &BinaryExpr{Op: "^", Left: expr, Right: &IntLit{Value: 1}}, nil
 	default:
 		return nil, fmt.Errorf("LLVM backend unsupported expression: %T", e)
 	}
@@ -659,6 +725,7 @@ func (l *lowerer) lowerTypeFromChecker(t types.Type) Type {
 	case types.TBool: return TypeBool
 	case types.TStruct: return Type(t.Name)
 	case types.TList: return Type("[" + string(l.lowerTypeFromChecker(t.Elem)) + "]")
+	case types.TPointer: return Type("*" + string(l.lowerTypeFromChecker(t.Elem)))
 	}
 	return TypeInt // fallback
 }

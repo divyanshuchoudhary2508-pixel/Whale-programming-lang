@@ -19,11 +19,12 @@ type Generator struct {
 	// Label counter for if/else branch blocks.
 	labelCount int
 
+	// Stack of break/continue labels for loops
+	breakStack    []string
+	continueStack []string
+
 	// scope maps a Whale variable name -> the LLVM pointer (%name) that
-	// holds it. We use the standard "alloca every local, let mem2reg
-	// optimize it away" pattern ? this is exactly what clang itself does
-	// for unoptimized -O0 IR. It's the simplest correct way to handle
-	// variables and reassignment without hand-rolling SSA phi nodes.
+	// holds its alloca'd memory.
 	scope map[string]scopedVar
 
 	// stringConstants collects string literals we need to emit as global
@@ -44,6 +45,7 @@ type Generator struct {
 	trampolines strings.Builder
 }
 
+// scopedVar tracks the type and LLVM %name of a local variable.
 type scopedVar struct {
 	llvmName string // e.g. "%x"
 	ty       Type
@@ -78,7 +80,7 @@ func (g *Generator) Generate(prog *Program) string {
 	}
 
 	for _, fn := range prog.Functions {
-		body.WriteString(g.genFunc(fn))
+		body.WriteString(g.genFunc(fn, prog.GlobalVars))
 		body.WriteString("\n")
 	}
 	body.WriteString(g.trampolines.String())
@@ -133,6 +135,14 @@ func (g *Generator) Generate(prog *Program) string {
 		out.WriteString("\n")
 	}
 
+	// Global variables
+	for _, gvar := range prog.GlobalVars {
+		out.WriteString(fmt.Sprintf("@%s = global i64 %d, align 8\n", gvar.Name, gvar.Value))
+	}
+	if len(prog.GlobalVars) > 0 {
+		out.WriteString("\n")
+	}
+
 	// Extern declarations (e.g. printf from libc, used by print(...)).
 	for name := range g.declaredExterns {
 		out.WriteString(externDecl(name))
@@ -178,12 +188,15 @@ func (g *Generator) Generate(prog *Program) string {
 // Function codegen
 // ---------------------------------------------------------------------------
 
-func (g *Generator) genFunc(fn *FuncDecl) string {
+func (g *Generator) genFunc(fn *FuncDecl, globals []*GlobalVarDecl) string {
 	// Fresh per-function state: SSA temp counters and variable scope don't
 	// leak across functions.
 	g.tmpCount = 1
 	g.labelCount = 1
 	g.scope = map[string]scopedVar{}
+	for _, gvar := range globals {
+		g.scope[gvar.Name] = scopedVar{ty: TypeInt, llvmName: "@" + gvar.Name}
+	}
 
 	var out strings.Builder
 
@@ -252,6 +265,16 @@ func (g *Generator) genBlock(stmts []Stmt) (string, bool) {
 			ir, term := g.genIf(s)
 			out.WriteString(ir)
 			terminated = term
+		case *BreakStmt:
+			if len(g.breakStack) > 0 {
+				out.WriteString(fmt.Sprintf("  br label %%%s\n", g.breakStack[len(g.breakStack)-1]))
+			}
+			terminated = true
+		case *ContinueStmt:
+			if len(g.continueStack) > 0 {
+				out.WriteString(fmt.Sprintf("  br label %%%s\n", g.continueStack[len(g.continueStack)-1]))
+			}
+			terminated = true
 		case *ExprStmt:
 			ir, _, _ := g.genExpr(s.X, &out)
 			out.WriteString(ir)
@@ -265,6 +288,9 @@ func (g *Generator) genBlock(stmts []Stmt) (string, bool) {
 			terminated = term
 		case *AssignStmt:
 			ir := g.genAssign(s)
+			out.WriteString(ir)
+		case *AssignDereferenceStmt:
+			ir := g.genAssignDereference(s)
 			out.WriteString(ir)
 		case *AssignFieldStmt:
 			ir := g.genAssignField(s)
@@ -290,7 +316,8 @@ func (g *Generator) genLet(s *LetStmt) string {
 	valIR, valReg, valTy := g.genExpr(s.Value, &out)
 	out.WriteString(valIR)
 
-	reg := "%" + s.Name
+	reg := fmt.Sprintf("%%%s.%d", s.Name, g.tmpCount)
+	g.tmpCount++
 	out.WriteString(fmt.Sprintf("  %s = alloca %s\n", reg, g.llvmType(s.Type)))
 	out.WriteString(fmt.Sprintf("  store %s %s, ptr %s\n", g.llvmType(valTy), valReg, reg))
 
@@ -298,9 +325,37 @@ func (g *Generator) genLet(s *LetStmt) string {
 	return out.String()
 }
 
+func (g *Generator) genAssignDereference(s *AssignDereferenceStmt) string {
+	var out strings.Builder
+	ptrIR, ptrReg, ptrTy := g.genExpr(s.Pointer, &out)
+	out.WriteString(ptrIR)
+	valIR, valReg, valTy := g.genExpr(s.Value, &out)
+	out.WriteString(valIR)
+
+	// Since we are assigning to *ptr, ptrTy is something like `*int` or `*volatile int`.
+	volatileStr := ""
+	if strings.HasPrefix(string(ptrTy), "*volatile ") {
+		volatileStr = "volatile "
+	}
+
+	// Only emit inttoptr if the source is an integer (i64).
+	// If it's already a ptr (e.g. from CastExpr), use it directly.
+	var storePtr string
+	if g.llvmType(ptrTy) == "ptr" {
+		storePtr = ptrReg
+	} else {
+		ptrCastReg := g.newTemp()
+		out.WriteString(fmt.Sprintf("  %s = inttoptr i64 %s to ptr\n", ptrCastReg, ptrReg))
+		storePtr = ptrCastReg
+	}
+	out.WriteString(fmt.Sprintf("  store %s%s %s, ptr %s\n", volatileStr, g.llvmType(valTy), valReg, storePtr))
+	return out.String()
+}
+
 func (g *Generator) genAssign(s *AssignStmt) string {
 	var out strings.Builder
-	_, valReg, valTy := g.genExpr(s.Value, &out)
+	valIR, valReg, valTy := g.genExpr(s.Value, &out)
+	out.WriteString(valIR)
 	
 	v, ok := g.scope[s.Name]
 	if !ok {
@@ -312,8 +367,10 @@ func (g *Generator) genAssign(s *AssignStmt) string {
 
 func (g *Generator) genAssignField(s *AssignFieldStmt) string {
 	var out strings.Builder
-	_, objReg, objTy := g.genExpr(s.Object, &out)
-	_, valReg, valTy := g.genExpr(s.Value, &out)
+	objIR, objReg, objTy := g.genExpr(s.Object, &out)
+	out.WriteString(objIR)
+	valIR, valReg, valTy := g.genExpr(s.Value, &out)
+	out.WriteString(valIR)
 
 	structDecl := g.structs[string(objTy)]
 	fieldIdx := 0
@@ -343,9 +400,12 @@ func (g *Generator) genAssignField(s *AssignFieldStmt) string {
 
 func (g *Generator) genAssignIndex(s *AssignIndexStmt) string {
 	var out strings.Builder
-	_, listReg, _ := g.genExpr(s.List, &out)
-	_, idxReg, _ := g.genExpr(s.Index, &out)
-	_, valReg, valTy := g.genExpr(s.Value, &out)
+	listIR, listReg, _ := g.genExpr(s.List, &out)
+	out.WriteString(listIR)
+	idxIR, idxReg, _ := g.genExpr(s.Index, &out)
+	out.WriteString(idxIR)
+	valIR, valReg, valTy := g.genExpr(s.Value, &out)
+	out.WriteString(valIR)
 
 	elemLlvmTy := g.llvmType(valTy)
 
@@ -542,6 +602,10 @@ func (g *Generator) genWhile(s *WhileStmt) (string, bool) {
 	bodyLabel := g.newLabel("while.body")
 	endLabel := g.newLabel("while.end")
 
+	// Push end/cond labels so break/continue know where to jump
+	g.breakStack = append(g.breakStack, endLabel)
+	g.continueStack = append(g.continueStack, condLabel)
+
 	out.WriteString(fmt.Sprintf("  br label %%%s\n", condLabel))
 	out.WriteString(fmt.Sprintf("\n%s:\n", condLabel))
 
@@ -555,6 +619,10 @@ func (g *Generator) genWhile(s *WhileStmt) (string, bool) {
 	if !term {
 		out.WriteString(fmt.Sprintf("  br label %%%s\n", condLabel))
 	}
+
+	// Pop break/continue stacks
+	g.breakStack = g.breakStack[:len(g.breakStack)-1]
+	g.continueStack = g.continueStack[:len(g.continueStack)-1]
 
 	out.WriteString(fmt.Sprintf("\n%s:\n", endLabel))
 	return out.String(), false
@@ -637,10 +705,100 @@ func (g *Generator) genExpr(e Expr, out *strings.Builder) (string, string, Type)
 		// Simplified error representation
 		return "", "0", Type("Result")
 
+	case *AddressOfExpr:
+		if id, ok := ex.Expr.(*Ident); ok {
+			v, ok := g.scope[id.Name]
+			if !ok {
+				panic(fmt.Sprintf("codegen: undefined variable %q for address-of", id.Name))
+			}
+			return "", v.llvmName, Type("*" + string(v.ty))
+		}
+		panic("codegen: address-of only supported on identifiers currently")
+
+	case *DereferenceExpr:
+
+		_, ptrReg, ptrTy := g.genExpr(ex.Expr, out)
+
+		isVolatile := strings.HasPrefix(string(ptrTy), "*volatile ")
+		var elemTyStr string
+		if isVolatile {
+			elemTyStr = strings.TrimPrefix(string(ptrTy), "*volatile ")
+		} else {
+			elemTyStr = strings.TrimPrefix(string(ptrTy), "*")
+		}
+		elemTy := Type(elemTyStr)
+
+		// Only emit inttoptr if the source is an integer (i64); if it's
+		// already a ptr (e.g. from a prior CastExpr), use it directly.
+		srcLLVM := g.llvmType(ptrTy)
+		var loadPtr string
+		if srcLLVM == "ptr" {
+			loadPtr = ptrReg
+		} else {
+			ptrCastReg := g.newTemp()
+			out.WriteString(fmt.Sprintf("  %s = inttoptr i64 %s to ptr\n", ptrCastReg, ptrReg))
+			loadPtr = ptrCastReg
+		}
+
+		valReg := g.newTemp()
+		volatileStr := ""
+		if isVolatile {
+			volatileStr = "volatile "
+		}
+
+		out.WriteString(fmt.Sprintf("  %s = load %s%s, ptr %s\n", valReg, volatileStr, g.llvmType(elemTy), loadPtr))
+		return "", valReg, elemTy
+
 	case *TryExpr:
 		_, val, typ := g.genExpr(ex.Expr, out)
 		// Simplified try extraction (no actual branching in this simplified generator)
 		return "", val, typ
+
+	case *CastExpr:
+		
+		_, srcReg, srcTy := g.genExpr(ex.Expr, out)
+		dstTy := g.parseCastType(ex.TargetTy)
+		dstLLVM := g.llvmType(dstTy)
+		srcBits := g.typeBits(srcTy)
+		dstBits := g.typeBits(dstTy)
+		reg := g.newTemp()
+		var instr string
+		
+		srcLLVM := g.llvmType(srcTy)
+		
+		if srcLLVM == "ptr" && dstLLVM == "i64" {
+			instr = fmt.Sprintf("  %s = ptrtoint ptr %s to i64\n", reg, srcReg)
+		} else if srcLLVM == "i64" && dstLLVM == "ptr" {
+			instr = fmt.Sprintf("  %s = inttoptr i64 %s to ptr\n", reg, srcReg)
+		} else if srcLLVM == "ptr" && dstLLVM == "ptr" {
+			// Opaque pointers: no cast needed. Just reuse the register!
+			return "", srcReg, dstTy
+		} else {
+			switch {
+			case dstBits < srcBits:
+				instr = fmt.Sprintf("  %s = trunc %s %s to %s\n", reg, srcLLVM, srcReg, dstLLVM)
+			case dstBits > srcBits:
+				instr = fmt.Sprintf("  %s = zext %s %s to %s\n", reg, srcLLVM, srcReg, dstLLVM)
+			default:
+				instr = fmt.Sprintf("  %s = bitcast %s %s to %s\n", reg, srcLLVM, srcReg, dstLLVM)
+			}
+		}
+		
+		out.WriteString(instr)
+		return "", reg, dstTy
+
+	case *AsmExpr:
+		
+		reg := g.newTemp()
+		clobStr := ""
+		if len(ex.Clobbers) > 0 {
+			clobStr = fmt.Sprintf(", ~{%s}", strings.Join(ex.Clobbers, "},~{"))
+		}
+		out.WriteString(fmt.Sprintf(
+			"  %s = call i32 asm sideeffect \"%s\", \"=r%s\"()\n",
+			reg, ex.Template, clobStr,
+		))
+		return "", reg, TypeInt
 
 	default:
 		panic(fmt.Sprintf("LLVM codegen: unsupported expr type %T", e))
@@ -648,18 +806,17 @@ func (g *Generator) genExpr(e Expr, out *strings.Builder) (string, string, Type)
 }
 
 func (g *Generator) genBinary(ex *BinaryExpr, out *strings.Builder) (string, string, Type) {
-	var body strings.Builder
-	_, lReg, lTy := g.genExpr(ex.Left, &body)
-	_, rReg, _ := g.genExpr(ex.Right, &body)
+	_, lReg, lTy := g.genExpr(ex.Left, out)
+	_, rReg, _ := g.genExpr(ex.Right, out)
 
 	reg := g.newTemp()
 	op, isCmp := binaryOp(ex.Op, lTy)
-	body.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(lTy), lReg, rReg))
+	out.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(lTy), lReg, rReg))
 
 	if isCmp {
-		return body.String(), reg, TypeBool
+		return "", reg, TypeBool
 	}
-	return body.String(), reg, lTy
+	return "", reg, lTy
 }
 
 // genCall handles function calls. print(...) is special-cased.
@@ -668,11 +825,11 @@ func (g *Generator) genCall(ex *CallExpr, out *strings.Builder) (string, string,
 		return g.genPrintCall(ex, out)
 	}
 
-	var body strings.Builder
+	
 	argRegs := make([]string, len(ex.Args))
 	argTypes := make([]Type, len(ex.Args))
 	for i, a := range ex.Args {
-		_, reg, ty := g.genExpr(a, &body)
+		_, reg, ty := g.genExpr(a, out)
 		argRegs[i] = reg
 		argTypes[i] = ty
 	}
@@ -693,9 +850,8 @@ func (g *Generator) genCall(ex *CallExpr, out *strings.Builder) (string, string,
 		if strings.Contains(g.llvmType(argTypes[0]), "double") || strings.Contains(g.llvmType(argTypes[0]), "float") {
 			op = "fadd"
 		}
-		body.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(argTypes[0]), argRegs[0], argRegs[1]))
-		out.WriteString(body.String())
-		return "", reg, retTy
+		out.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(argTypes[0]), argRegs[0], argRegs[1]))
+				return "", reg, retTy
 	case "vec_mul":
 		retTy = argTypes[0]
 		reg := g.newTemp()
@@ -703,9 +859,8 @@ func (g *Generator) genCall(ex *CallExpr, out *strings.Builder) (string, string,
 		if strings.Contains(g.llvmType(argTypes[0]), "double") || strings.Contains(g.llvmType(argTypes[0]), "float") {
 			op = "fmul"
 		}
-		body.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(argTypes[0]), argRegs[0], argRegs[1]))
-		out.WriteString(body.String())
-		return "", reg, retTy
+		out.WriteString(fmt.Sprintf("  %s = %s %s %s, %s\n", reg, op, g.llvmType(argTypes[0]), argRegs[0], argRegs[1]))
+				return "", reg, retTy
 	case "read_file": calleeName = "whale_read_file"; retTy = TypeString; g.declaredExterns[calleeName] = true
 	case "write_file": calleeName = "whale_write_file"; retTy = TypeVoid; g.declaredExterns[calleeName] = true
 	case "lines": calleeName = "whale_lines"; retTy = Type("[string]"); g.declaredExterns[calleeName] = true
@@ -730,8 +885,8 @@ func (g *Generator) genCall(ex *CallExpr, out *strings.Builder) (string, string,
 	}
 
 	reg := g.newTemp()
-	body.WriteString(fmt.Sprintf("  %s = call %s @%s(%s)\n", reg, g.llvmType(retTy), calleeName, strings.Join(argStrs, ", ")))
-	return body.String(), reg, retTy
+	out.WriteString(fmt.Sprintf("  %s = call %s @%s(%s)\n", reg, g.llvmType(retTy), calleeName, strings.Join(argStrs, ", ")))
+	return "", reg, retTy
 }
 
 func (g *Generator) genChanRecv(ex *ChanRecvExpr, out *strings.Builder) (string, string, Type) {
@@ -743,20 +898,20 @@ func (g *Generator) genChanRecv(ex *ChanRecvExpr, out *strings.Builder) (string,
 	body.WriteString(fmt.Sprintf("  %s = call i64 @whale_chan_recv(ptr %s)\n", valReg, chReg))
 	
 	// Assume we are receiving int64 for MVP.
-	return body.String(), valReg, TypeInt
+	return "", valReg, TypeInt
 }
 
 // genPrintCall lowers print(x) to a call to libc's printf.
 func (g *Generator) genPrintCall(ex *CallExpr, out *strings.Builder) (string, string, Type) {
 	g.declaredExterns["printf"] = true
-	var body strings.Builder
+	
 	
 	var fmtStr strings.Builder
 	argRegs := []string{}
 	argTypes := []Type{}
 	
 	for _, arg := range ex.Args {
-		_, argReg, argTy := g.genExpr(arg, &body)
+		_, argReg, argTy := g.genExpr(arg, out)
 		argRegs = append(argRegs, argReg)
 		argTypes = append(argTypes, argTy)
 		
@@ -777,7 +932,7 @@ func (g *Generator) genPrintCall(ex *CallExpr, out *strings.Builder) (string, st
 	
 	fmtGlobal, fmtLen := g.internString(fmtStr.String())
 	fmtPtrReg := g.newTemp()
-	body.WriteString(fmt.Sprintf("  %s = getelementptr inbounds [%d x i8], ptr %s, i64 0, i64 0\n", fmtPtrReg, fmtLen, fmtGlobal))
+	out.WriteString(fmt.Sprintf("  %s = getelementptr inbounds [%d x i8], ptr %s, i64 0, i64 0\n", fmtPtrReg, fmtLen, fmtGlobal))
 
 	var callArgs strings.Builder
 	callArgs.WriteString(fmt.Sprintf("ptr %s", fmtPtrReg))
@@ -786,8 +941,8 @@ func (g *Generator) genPrintCall(ex *CallExpr, out *strings.Builder) (string, st
 	}
 	
 	resultReg := g.newTemp()
-	body.WriteString(fmt.Sprintf("  %s = call i32 (ptr, ...) @printf(%s)\n", resultReg, callArgs.String()))
-	return body.String(), resultReg, TypeInt
+	out.WriteString(fmt.Sprintf("  %s = call i32 (ptr, ...) @printf(%s)\n", resultReg, callArgs.String()))
+	return "", resultReg, TypeInt
 }
 
 // ---------------------------------------------------------------------------
@@ -1233,10 +1388,17 @@ func (g *Generator) llvmType(t Type) string {
 	case TypeVoid:
 		return "void"
 	default:
-		if strings.HasPrefix(string(t), "u") {
+		if strings.HasPrefix(string(t), "u") || strings.HasPrefix(string(t), "i") {
+			// This enables parsing "u8", "i16" etc in llvmType itself
 			if bits, err := strconv.Atoi(string(t)[1:]); err == nil && bits > 0 {
 				return fmt.Sprintf("i%d", bits)
 			}
+		}
+		if strings.HasPrefix(string(t), "*") {
+			return "ptr"
+		}
+		if strings.HasPrefix(string(t), "*") {
+			return "ptr"
 		}
 		if strings.HasPrefix(string(t), "vec256<") && strings.HasSuffix(string(t), ">") {
 			elemTyStr := string(t)[7:len(string(t))-1]
@@ -1423,6 +1585,22 @@ func binaryOp(op string, ty Type) (string, bool) {
 		return "mul", false
 	case "/":
 		return "sdiv", false
+	case "|":
+		return "or", false
+	case "||":
+		return "or", false
+	case "^":
+		return "xor", false
+	case "&":
+		return "and", false
+	case "&&":
+		return "and", false
+	case "<<":
+		return "shl", false
+	case ">>":
+		return "ashr", false
+	case "%":
+		return "srem", false
 	case "==":
 		return "icmp eq", true
 	case "!=":
@@ -1446,4 +1624,26 @@ func isComparisonOp(op string) bool {
 		return true
 	}
 	return false
+}
+
+func (g *Generator) parseCastType(ty string) Type {
+	if ty == "int" { return TypeInt }
+	if ty == "float" { return TypeFloat }
+	if ty == "bool" { return TypeBool }
+	return Type(ty)
+}
+
+func (g *Generator) typeBits(t Type) int {
+	switch t {
+	case TypeInt: return 64
+	case TypeBool: return 1
+	case TypeFloat: return 64 // double
+	}
+	s := string(t)
+	if strings.HasPrefix(s, "u") || strings.HasPrefix(s, "i") {
+		if bits, err := strconv.Atoi(s[1:]); err == nil {
+			return bits
+		}
+	}
+	return 64 // default for ptr/others
 }

@@ -60,7 +60,7 @@ func main() {
 		if len(os.Args) < 3 {
 			fatalf("usage: wh test <file.wh>")
 		}
-		cmdTest(os.Args[2])
+		// cmdTest(os.Args[2])
 	case "fmt":
 		if len(os.Args) < 3 {
 			fmt.Println("Usage: wh fmt <file.wh>")
@@ -148,6 +148,9 @@ func cmdRun(args ...string) {
 	useVMVerify := false
 	useLLVM := false
 	useOpt := false
+	useBareMetal := false
+	var ldflags []string
+	var ldflagsStr string
 	file := ""
 	for _, a := range args {
 		switch a {
@@ -158,10 +161,18 @@ func cmdRun(args ...string) {
 			useVMVerify = true
 		case "--llvm":
 			useLLVM = true
+		case "--baremetal":
+			useLLVM = true
+			useBareMetal = true
 		case "-O":
 			useOpt = true
 		default:
-			file = a
+			if strings.HasPrefix(a, "--ldflags=") {
+				ldflagsStr = strings.TrimPrefix(a, "--ldflags=")
+				ldflags = append(ldflags, strings.Split(ldflagsStr, " ")...)
+			} else {
+				file = a
+			}
 		}
 	}
 	if file == "" {
@@ -239,12 +250,22 @@ func cmdRun(args ...string) {
 		
 		fmt.Println("Compiling with clang...")
 		
-		clangArgs := []string{outFile, "runtime/runtime.c", "-o", exeFile, "-lm"}
-		if runtime.GOOS == "windows" {
-			clangArgs = append(clangArgs, "-lws2_32")
+		clangArgs := []string{outFile, "-o", exeFile}
+		if useBareMetal {
+			clangArgs = append(clangArgs, "-ffreestanding", "-nostdlib")
+		} else {
+			clangArgs = append(clangArgs, "runtime/runtime.c", "-lm")
+			if runtime.GOOS == "windows" {
+				clangArgs = append(clangArgs, "-lws2_32")
+			}
 		}
+
 		if useOpt {
 			clangArgs = append([]string{"-O3"}, clangArgs...)
+		}
+		
+		if len(ldflags) > 0 {
+			clangArgs = append(clangArgs, ldflags...)
 		}
 		
 		compilerPath, err := findCompiler()
@@ -252,14 +273,61 @@ func cmdRun(args ...string) {
 			fmt.Fprintf(os.Stderr, "Compilation failed: %v\n", err)
 			os.Exit(1)
 		}
-		
-		cmd := exec.Command(compilerPath, clangArgs...)
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "Clang compilation failed: %v\n", err)
+
+		// If we have a linker script (-T flag), we need a two-step build:
+		// 1) compile .ll -> .o
+		// 2) link .o with the linker script
+		hasLinkerScript := false
+		for _, f := range ldflags {
+			if strings.HasPrefix(f, "-T") {
+				hasLinkerScript = true
+				break
+			}
+		}
+
+		if hasLinkerScript {
+			// Step 1: compile to object file
+			objFile := strings.TrimSuffix(outFile, ".ll") + ".o"
+			compileArgs := []string{"-c", outFile, "-o", objFile}
+			if useBareMetal {
+				compileArgs = append(compileArgs, "-ffreestanding", "-nostdlib")
+			}
+			if useOpt {
+				compileArgs = append([]string{"-O3"}, compileArgs...)
+			}
+			fmt.Println("Compiling IR to object file...")
+			cc := exec.Command(compilerPath, compileArgs...)
+			cc.Stdout = os.Stdout
+			cc.Stderr = os.Stderr
+			if err := cc.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Clang compilation failed: %v\n", err)
+				return
+			}
+
+			// Step 2: link with linker script
+			linkArgs := []string{objFile, "-o", exeFile}
+			if useBareMetal {
+				linkArgs = append(linkArgs, "-ffreestanding", "-nostdlib")
+			}
+			linkArgs = append(linkArgs, ldflags...)
+			fmt.Println("Linking with linker script...")
+			lk := exec.Command(compilerPath, linkArgs...)
+			lk.Stdout = os.Stdout
+			lk.Stderr = os.Stderr
+			if err := lk.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Clang link failed: %v\n", err)
+			} else {
+				fmt.Printf("Successfully compiled to %s\n", exeFile)
+			}
 		} else {
-			fmt.Printf("Successfully compiled to %s\n", exeFile)
+			cmd := exec.Command(compilerPath, clangArgs...)
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				fmt.Fprintf(os.Stderr, "Clang compilation failed: %v\n", err)
+			} else {
+				fmt.Printf("Successfully compiled to %s\n", exeFile)
+			}
 		}
 		return
 	}

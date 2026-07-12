@@ -182,14 +182,23 @@ func (l *lexer) readIdentOrKeyword(startLine, startCol int) {
 func (l *lexer) readNumber(startLine, startCol int) {
 	start := l.pos
 	isFloat := false
-	for isDigit(l.peek()) {
-		l.advance()
-	}
-	if l.peek() == '.' && isDigit(l.peekAt(1)) {
-		isFloat = true
-		l.advance() // consume '.'
+	
+	if l.peek() == '0' && (l.peekAt(1) == 'x' || l.peekAt(1) == 'X') {
+		l.advance() // '0'
+		l.advance() // 'x'
+		for isHexDigit(l.peek()) {
+			l.advance()
+		}
+	} else {
 		for isDigit(l.peek()) {
 			l.advance()
+		}
+		if l.peek() == '.' && isDigit(l.peekAt(1)) {
+			isFloat = true
+			l.advance() // consume '.'
+			for isDigit(l.peek()) {
+				l.advance()
+			}
 		}
 	}
 	lit := l.src[start:l.pos]
@@ -292,9 +301,6 @@ func (l *lexer) run() {
 
 		// Operators / punctuation — longest match first
 		switch {
-		case r == '|' && l.peekAt(1) == '>':
-			l.advance(); l.advance()
-			l.emit(TOKEN_PIPE_GT, "|>", startLine, startCol)
 		case r == '=' && l.peekAt(1) == '=':
 			l.advance(); l.advance()
 			l.emit(TOKEN_EQEQ, "==", startLine, startCol)
@@ -304,18 +310,39 @@ func (l *lexer) run() {
 		case r == '<' && l.peekAt(1) == '=':
 			l.advance(); l.advance()
 			l.emit(TOKEN_LTE, "<=", startLine, startCol)
+		case r == '<' && l.peekAt(1) == '<':
+			l.advance(); l.advance()
+			l.emit(TOKEN_LSHIFT, "<<", startLine, startCol)
 		case r == '<' && l.peekAt(1) == '-':
 			l.advance(); l.advance()
 			l.emit(TOKEN_LARROW, "<-", startLine, startCol)
 		case r == '>' && l.peekAt(1) == '=':
 			l.advance(); l.advance()
 			l.emit(TOKEN_GTE, ">=", startLine, startCol)
+		case r == '>' && l.peekAt(1) == '>':
+			l.advance(); l.advance()
+			l.emit(TOKEN_RSHIFT, ">>", startLine, startCol)
 		case r == '&' && l.peekAt(1) == '&':
 			l.advance(); l.advance()
 			l.emit(TOKEN_AND, "&&", startLine, startCol)
+		case r == '&':
+			l.advance()
+			l.emit(TOKEN_AMP, "&", startLine, startCol)
 		case r == '|' && l.peekAt(1) == '|':
 			l.advance(); l.advance()
 			l.emit(TOKEN_OR, "||", startLine, startCol)
+		case r == '|' && l.peekAt(1) == '>':
+			l.advance(); l.advance()
+			l.emit(TOKEN_PIPE_GT, "|>", startLine, startCol)
+		case r == '|':
+			l.advance()
+			l.emit(TOKEN_PIPE, "|", startLine, startCol)
+		case r == '^':
+			l.advance()
+			l.emit(TOKEN_CARET, "^", startLine, startCol)
+		case r == '~':
+			l.advance()
+			l.emit(TOKEN_TILDE, "~", startLine, startCol)
 		case r == '=' && l.peekAt(1) == '>':
 			l.advance(); l.advance()
 			l.emit(TOKEN_ARROW, "=>", startLine, startCol)
@@ -399,4 +426,8 @@ func isIdentStart(r rune) bool {
 
 func isDigit(r rune) bool {
 	return r >= '0' && r <= '9'
+}
+
+func isHexDigit(r rune) bool {
+	return isDigit(r) || (r >= 'a' && r <= 'f') || (r >= 'A' && r <= 'F')
 }

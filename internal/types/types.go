@@ -65,6 +65,8 @@ type TUnknown struct{}
 type TChan struct{ Elem Type }
 type TError struct{}
 type TResult struct{ Elem Type }
+type TPointer struct{ Elem Type }
+type TVolatilePointer struct{ Elem Type }
 
 func (TInt) typeMarker()     {}
 func (TUint) typeMarker()    {}
@@ -85,6 +87,8 @@ func (TUnknown) typeMarker() {}
 func (TChan) typeMarker()    {}
 func (TError) typeMarker()   {}
 func (TResult) typeMarker()  {}
+func (TPointer) typeMarker() {}
+func (TVolatilePointer) typeMarker() {}
 
 func (t TInt) String() string    { return "int" }
 func (t TUint) String() string   { return fmt.Sprintf("u%d", t.Bits) }
@@ -153,6 +157,8 @@ func (t TResult) String() string {
 	}
 	return "Result<" + t.Elem.String() + ">"
 }
+func (t TPointer) String() string { return "*" + t.Elem.String() }
+func (t TVolatilePointer) String() string { return "*volatile " + t.Elem.String() }
 
 // ============================================================================
 // Errors
@@ -569,6 +575,20 @@ func (c *checker) checkStmt(s ast.Stmt) {
 				c.errorAt(s.Pos, "cannot assign %s to %s", valTy, declared)
 			}
 		}
+	case *ast.AssignDereferenceStmt:
+		ptrTy := c.checkExpr(s.Pointer)
+		valTy := c.checkExpr(s.Value)
+		if ptr, ok := ptrTy.(TPointer); ok {
+			if !sameType(ptr.Elem, valTy) && !isUnknown(ptr.Elem) && !isUnknown(valTy) {
+				c.errorAt(s.Pos, "cannot assign %s to dereferenced %s", valTy, ptr.Elem)
+			}
+		} else if vptr, ok := ptrTy.(TVolatilePointer); ok {
+			if !sameType(vptr.Elem, valTy) && !isUnknown(vptr.Elem) && !isUnknown(valTy) {
+				c.errorAt(s.Pos, "cannot assign %s to dereferenced %s", valTy, vptr.Elem)
+			}
+		} else if !isUnknown(ptrTy) {
+			c.errorAt(s.Pos, "cannot dereference non-pointer type %s", ptrTy)
+		}
 	case *ast.AssignFieldStmt:
 		objTy := c.checkExpr(s.Object)
 		valTy := c.checkExpr(s.Value)
@@ -780,6 +800,29 @@ func (c *checker) checkExprInternal(e ast.Expr) Type {
 				c.errorAt(e.Pos, "operator ! expected bool, got %s", inner)
 			}
 			return TBool{}
+		case "~":
+			if _, ok := inner.(TInt); ok {
+				return TInt{}
+			}
+			if !isUnknown(inner) {
+				c.errorAt(e.Pos, "operator ~ expected int, got %s", inner)
+			}
+			return TInt{}
+		}
+		return TUnknown{}
+	case *ast.AddressOfExpr:
+		innerT := c.checkExpr(e.Expr)
+		return TPointer{Elem: innerT}
+	case *ast.DereferenceExpr:
+		innerT := c.checkExpr(e.Expr)
+		if ptr, ok := innerT.(TPointer); ok {
+			return ptr.Elem
+		}
+		if vptr, ok := innerT.(TVolatilePointer); ok {
+			return vptr.Elem
+		}
+		if !isUnknown(innerT) {
+			c.errorAt(e.Pos, "cannot dereference non-pointer type %s", innerT)
 		}
 		return TUnknown{}
 	case *ast.ComptimeExpr:
@@ -817,6 +860,11 @@ func (c *checker) checkExprInternal(e ast.Expr) Type {
 			c.errorAt(e.Pos, "cannot receive from non-channel type %s", chTy)
 		}
 		return TUnknown{}
+	case *ast.CastExpr:
+		c.checkExpr(e.Expr)
+		return c.resolveTypeName(e.Pos, e.TargetTy)
+	case *ast.AsmExpr:
+		return TInt{}
 	case *ast.BinaryOp:
 		return c.checkBinary(e)
 	case *ast.CallExpr:
@@ -969,7 +1017,7 @@ func (c *checker) checkBinary(e *ast.BinaryOp) Type {
 		}
 		c.errorAt(e.Pos, "operator + not defined for %s and %s", leftT, rightT)
 		return TUnknown{}
-	case "-", "*", "/", "%":
+	case "-", "*", "/", "%", "|", "&", "^", "<<", ">>":
 		if isNumeric(leftT) && isNumeric(rightT) {
 			if _, ok := leftT.(TFloat); ok {
 				return TFloat{}
@@ -1246,6 +1294,16 @@ func (c *checker) resolveTypeName(pos ast.Position, name string) Type {
 		return TUnknown{}
 	}
 	
+	if strings.HasPrefix(name, "*volatile ") {
+		elemType := c.resolveTypeName(pos, name[10:])
+		return TVolatilePointer{Elem: elemType}
+	}
+	
+	if strings.HasPrefix(name, "*") {
+		elemType := c.resolveTypeName(pos, name[1:])
+		return TPointer{Elem: elemType}
+	}
+	
 	// Check for generic variables in scope
 	if c.typeParams != nil && c.typeParams[name] {
 		return TGenericVar{Name: name}
@@ -1285,6 +1343,22 @@ func (c *checker) resolveTypeName(pos ast.Position, name string) Type {
 	case "()":
 		return TUnit{}
 	case "int":
+		return TInt{}
+	case "u8":
+		return TUint{Bits: 8}
+	case "u16":
+		return TUint{Bits: 16}
+	case "u32":
+		return TUint{Bits: 32}
+	case "u64":
+		return TUint{Bits: 64}
+	case "i8":
+		return TInt{}
+	case "i16":
+		return TInt{}
+	case "i32":
+		return TInt{}
+	case "i64":
 		return TInt{}
 	case "float":
 		return TFloat{}
@@ -1368,6 +1442,12 @@ func sameType(a, b Type) bool {
 	case TBool:
 		_, ok := b.(TBool)
 		return ok
+	case TPointer:
+		bp, ok := b.(TPointer)
+		return ok && sameType(a.Elem, bp.Elem)
+	case TVolatilePointer:
+		bp, ok := b.(TVolatilePointer)
+		return ok && sameType(a.Elem, bp.Elem)
 	case TUnit:
 		_, ok := b.(TUnit)
 		return ok

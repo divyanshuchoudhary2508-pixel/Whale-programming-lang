@@ -179,6 +179,8 @@ func (p *parser) parseExprStatement() ast.Stmt {
 			return &ast.AssignFieldStmt{Pos: pos, Object: field.Expr, Field: field.Field, Value: value}
 		} else if idx, ok := expr.(*ast.IndexExpr); ok {
 			return &ast.AssignIndexStmt{Pos: pos, List: idx.Expr, Index: idx.Index, Value: value}
+		} else if deref, ok := expr.(*ast.DereferenceExpr); ok {
+			return &ast.AssignDereferenceStmt{Pos: pos, Pointer: deref.Expr, Value: value}
 		} else {
 			p.errorAt(p.current(), "invalid assignment target")
 			return &ast.ExprStmt{Pos: pos, Expr: expr}
@@ -255,6 +257,14 @@ func (p *parser) parseTypeParams() []string {
 }
 
 func (p *parser) parseTypeString() string {
+	if p.current().Type == lexer.TOKEN_STAR {
+		p.advance()
+		if p.current().Type == lexer.TOKEN_VOLATILE {
+			p.advance()
+			return "*volatile " + p.parseTypeString()
+		}
+		return "*" + p.parseTypeString()
+	}
 	if p.current().Type == lexer.TOKEN_LBRACK {
 		p.advance() // '['
 		inner := p.parseTypeString()
@@ -332,12 +342,14 @@ func (p *parser) parseBlock() *ast.BlockStmt {
 	p.advance() // consume '{'
 	body := make([]ast.Stmt, 0, 4)
 	for p.current().Type != lexer.TOKEN_RBRACE && p.current().Type != lexer.TOKEN_EOF {
+		startPos := p.pos
 		stmt := p.parseStatement()
-		if stmt == nil {
-			p.advance() // skip bad token
-			continue
+		if stmt != nil {
+			body = append(body, stmt)
 		}
-		body = append(body, stmt)
+		if p.pos == startPos {
+			p.advance() // force advance to avoid infinite loop
+		}
 	}
 	p.expect(lexer.TOKEN_RBRACE, "'}'")
 	return &ast.BlockStmt{Pos: pos, Body: body}
@@ -681,6 +693,14 @@ func precedence(tt lexer.TokenType) (int, int) {
 		return 20, 21
 	case lexer.TOKEN_AND:
 		return 30, 31
+	case lexer.TOKEN_PIPE:   // bitwise OR
+		return 32, 33
+	case lexer.TOKEN_CARET:  // bitwise XOR
+		return 34, 35
+	case lexer.TOKEN_AMP:    // bitwise AND (when used as binary op, not address-of)
+		return 36, 37
+	case lexer.TOKEN_LSHIFT, lexer.TOKEN_RSHIFT:
+		return 48, 49
 	case lexer.TOKEN_EQEQ, lexer.TOKEN_NEQ:
 		return 40, 40
 	case lexer.TOKEN_LT, lexer.TOKEN_LTE, lexer.TOKEN_GT, lexer.TOKEN_GTE:
@@ -806,6 +826,18 @@ func (p *parser) parsePostfix() ast.Expr {
 				Pos:  pos,
 				Expr: left,
 			}
+		case lexer.TOKEN_AS:
+			pos := tokPos(p.current())
+			p.advance() // consume 'as'
+			typeName := p.parseTypeString()
+			if typeName == "" {
+				return left
+			}
+			left = &ast.CastExpr{
+				Pos:      pos,
+				Expr:     left,
+				TargetTy: typeName,
+			}
 		default:
 			return left
 		}
@@ -842,6 +874,27 @@ func (p *parser) parseUnary() ast.Expr {
 			return nil
 		}
 		return &ast.UnaryOp{Pos: tokPos(tok), Op: "!", Expr: expr}
+	case lexer.TOKEN_TILDE:
+		p.advance()
+		expr := p.parsePostfix()
+		if expr == nil {
+			return nil
+		}
+		return &ast.UnaryOp{Pos: tokPos(tok), Op: "~", Expr: expr}
+	case lexer.TOKEN_AMP:
+		p.advance()
+		expr := p.parsePostfix()
+		if expr == nil {
+			return nil
+		}
+		return &ast.AddressOfExpr{Pos: tokPos(tok), Expr: expr}
+	case lexer.TOKEN_STAR:
+		p.advance()
+		expr := p.parsePostfix()
+		if expr == nil {
+			return nil
+		}
+		return &ast.DereferenceExpr{Pos: tokPos(tok), Expr: expr}
 	case lexer.TOKEN_LARROW:
 		p.advance()
 		expr := p.parsePostfix()
@@ -995,6 +1048,29 @@ func (p *parser) parsePrimary() ast.Expr {
 		return &ast.BoolLit{Pos: tokPos(tok), Value: false}
 
 	case lexer.TOKEN_IDENT, lexer.TOKEN_STREAM:
+		// asm("template", clobbers...) inline assembly
+		if tok.Literal == "asm" && p.peek(1).Type == lexer.TOKEN_LPAREN {
+			p.advance() // consume 'asm'
+			p.advance() // consume '('
+			if p.current().Type != lexer.TOKEN_STRING {
+				p.errorAt(p.current(), "expected string template in asm()")
+				return nil
+			}
+			tmpl := p.advance().Literal
+			clobbers := []string{}
+			if p.current().Type == lexer.TOKEN_COMMA {
+				p.advance() // consume ','
+				for p.current().Type == lexer.TOKEN_STRING {
+					clobbers = append(clobbers, p.advance().Literal)
+					if p.current().Type != lexer.TOKEN_COMMA {
+						break
+					}
+					p.advance()
+				}
+			}
+			p.expect(lexer.TOKEN_RPAREN, "')'")
+			return &ast.AsmExpr{Pos: tokPos(tok), Template: tmpl, Clobbers: clobbers, SideEffect: true}
+		}
 		// Could be struct literal: Name { field: val }
 		if p.peek(1).Type == lexer.TOKEN_LBRACE {
 			// Lookahead to distinguish from control-flow block brace
@@ -1176,7 +1252,7 @@ func (p *parser) parseMatchExpr() ast.Expr {
 // ----------------------------------------------------------------------------
 
 func parseInt64(s string) (int64, error) {
-	return strconv.ParseInt(s, 10, 64)
+	return strconv.ParseInt(s, 0, 64)
 }
 
 func parseFloat64(s string) (float64, error) {

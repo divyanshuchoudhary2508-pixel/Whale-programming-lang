@@ -1,0 +1,11 @@
+fn main() {
+    let mut x: int = 42;
+    let ptr: *int = &x;
+    
+    // Read via pointer
+    print(*ptr);
+    
+    // Write via pointer
+    *ptr = 100;
+    print(x);
+}

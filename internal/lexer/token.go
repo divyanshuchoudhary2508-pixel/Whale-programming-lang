@@ -30,6 +30,12 @@ const (
 	TOKEN_LTE     // <=
 	TOKEN_GTE     // >=
 	TOKEN_AND     // &&
+	TOKEN_AMP     // &
+	TOKEN_PIPE    // |   (bitwise OR)
+	TOKEN_CARET   // ^   (bitwise XOR)
+	TOKEN_TILDE   // ~   (bitwise NOT)
+	TOKEN_LSHIFT  // <<  (left shift)
+	TOKEN_RSHIFT  // >>  (right shift)
 	TOKEN_OR      // ||
 	TOKEN_NOT     // !
 	TOKEN_PIPE_GT // |>   <-- the marquee operator
@@ -81,6 +87,7 @@ const (
 	TOKEN_EXTERN
 	TOKEN_TRAIT
 	TOKEN_IMPL
+	TOKEN_VOLATILE
 )
 
 // keywords maps reserved identifier strings to their token types.
@@ -111,9 +118,10 @@ var keywords = map[string]TokenType{
 	"error":  TOKEN_ERROR,
 	"arena":  TOKEN_ARENA,
 	"packed": TOKEN_PACKED,
-	"extern": TOKEN_EXTERN,
-	"trait":  TOKEN_TRAIT,
-	"impl":   TOKEN_IMPL,
+	"extern":   TOKEN_EXTERN,
+	"trait":    TOKEN_TRAIT,
+	"impl":     TOKEN_IMPL,
+	"volatile": TOKEN_VOLATILE,
 }
 
 // String returns a human-readable name for the token type.
@@ -157,6 +165,18 @@ func (t TokenType) String() string {
 		return ">="
 	case TOKEN_AND:
 		return "&&"
+	case TOKEN_AMP:
+		return "&"
+	case TOKEN_PIPE:
+		return "|"
+	case TOKEN_CARET:
+		return "^"
+	case TOKEN_TILDE:
+		return "~"
+	case TOKEN_LSHIFT:
+		return "<<"
+	case TOKEN_RSHIFT:
+		return ">>"
 	case TOKEN_OR:
 		return "||"
 	case TOKEN_NOT:
@@ -251,6 +271,8 @@ func (t TokenType) String() string {
 		return "trait"
 	case TOKEN_IMPL:
 		return "impl"
+	case TOKEN_VOLATILE:
+		return "volatile"
 	default:
 		return "UNKNOWN"
 	}

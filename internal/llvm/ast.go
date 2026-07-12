@@ -21,10 +21,16 @@ package llvm
 // Program is the root node: a list of top-level function declarations.
 // Whale requires a `fn main() { ... }` entry point, same as Go/Rust/C.
 type Program struct {
-	Structs   []*StructDecl
-	Enums     []*EnumDecl
-	Functions []*FuncDecl
-	Externs   []*ExternFuncDecl
+	Structs    []*StructDecl
+	Enums      []*EnumDecl
+	Functions  []*FuncDecl
+	Externs    []*ExternFuncDecl
+	GlobalVars []*GlobalVarDecl
+}
+
+type GlobalVarDecl struct {
+	Name  string
+	Value int64
 }
 
 // StructDecl: struct Name { Fields... }
@@ -95,6 +101,9 @@ type ReturnStmt struct {
 }
 
 // IfStmt: if <cond> { Then } else { Else }   (Else may be nil)
+type BreakStmt struct{}
+type ContinueStmt struct{}
+
 type IfStmt struct {
 	Cond Expr
 	Then []Stmt
@@ -131,6 +140,11 @@ type AssignFieldStmt struct {
 	Value  Expr
 }
 
+type AssignDereferenceStmt struct {
+	Pointer Expr
+	Value   Expr
+}
+
 // AssignIndexStmt: arr[index] = value
 type AssignIndexStmt struct {
 	List  Expr
@@ -143,8 +157,11 @@ func (*ReturnStmt) stmtNode()      {}
 func (*IfStmt) stmtNode()          {}
 func (*ExprStmt) stmtNode()        {}
 func (*WhileStmt) stmtNode()       {}
+func (*BreakStmt) stmtNode()       {}
+func (*ContinueStmt) stmtNode()    {}
 func (*AssignStmt) stmtNode()      {}
 func (*AssignFieldStmt) stmtNode() {}
+func (*AssignDereferenceStmt) stmtNode() {}
 func (*AssignIndexStmt) stmtNode() {}
 func (*SpawnStmt) stmtNode()       {}
 func (*ChanSendStmt) stmtNode()    {}
@@ -228,6 +245,25 @@ type FieldAccess struct {
 	Field  string
 }
 
+type AddressOfExpr struct {
+	Expr Expr
+}
+
+type DereferenceExpr struct {
+	Expr Expr
+}
+
+type CastExpr struct {
+	Expr     Expr
+	TargetTy string // e.g. "u8", "u16", "u32", "u64", "int"
+}
+
+type AsmExpr struct {
+	Template   string
+	Clobbers   []string
+	SideEffect bool
+}
+
 func (*IntLit) exprNode()      {}
 func (*FloatLit) exprNode()    {}
 func (*BoolLit) exprNode()     {}
@@ -270,6 +306,10 @@ func (*ConstructEnumExpr) exprNode() {}
 func (*ErrorLit) exprNode()          {}
 func (*TryExpr) exprNode()           {}
 func (*ChanRecvExpr) exprNode() {}
+func (*AddressOfExpr) exprNode() {}
+func (*DereferenceExpr) exprNode() {}
+func (*CastExpr) exprNode() {}
+func (*AsmExpr) exprNode() {}
 
 // ChanRecvExpr: <-chan
 type ChanRecvExpr struct {

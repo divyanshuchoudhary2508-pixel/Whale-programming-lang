@@ -139,6 +139,20 @@ func (s *AssignIndexStmt) String() string {
 	return s.List.String() + "[" + s.Index.String() + "] = " + s.Value.String() + ";"
 }
 
+// AssignDereferenceStmt is an assignment to a dereferenced pointer.
+//	*ptr = x;
+type AssignDereferenceStmt struct {
+	Pos     Position
+	Pointer Expr
+	Value   Expr
+}
+
+func (s *AssignDereferenceStmt) nodeMarker() {}
+func (s *AssignDereferenceStmt) stmtMarker() {}
+func (s *AssignDereferenceStmt) String() string {
+	return "*" + s.Pointer.String() + " = " + s.Value.String() + ";"
+}
+
 // ExprStmt is an expression used as a statement.
 //
 //	print(x);
@@ -529,6 +543,26 @@ func (e *UnaryOp) nodeMarker() {}
 func (e *UnaryOp) exprMarker() {}
 func (e *UnaryOp) String() string { return "(" + e.Op + e.Expr.String() + ")" }
 
+// AddressOfExpr is `&x`.
+type AddressOfExpr struct {
+	Pos  Position
+	Expr Expr
+}
+
+func (e *AddressOfExpr) nodeMarker() {}
+func (e *AddressOfExpr) exprMarker() {}
+func (e *AddressOfExpr) String() string { return "(&" + e.Expr.String() + ")" }
+
+// DereferenceExpr is `*x`.
+type DereferenceExpr struct {
+	Pos  Position
+	Expr Expr
+}
+
+func (e *DereferenceExpr) nodeMarker() {}
+func (e *DereferenceExpr) exprMarker() {}
+func (e *DereferenceExpr) String() string { return "(*" + e.Expr.String() + ")" }
+
 // ChanRecvExpr is a channel receive expression: <-ch.
 type ChanRecvExpr struct {
 	Pos  Position
@@ -538,6 +572,29 @@ type ChanRecvExpr struct {
 func (e *ChanRecvExpr) nodeMarker() {}
 func (e *ChanRecvExpr) exprMarker() {}
 func (e *ChanRecvExpr) String() string { return "(<-" + e.Chan.String() + ")" }
+
+// CastExpr is a type cast: x as u8, x as u32.
+type CastExpr struct {
+	Pos      Position
+	Expr     Expr
+	TargetTy string // the type name e.g. "u8", "u16", "u32", "u64", "int"
+}
+
+func (e *CastExpr) nodeMarker() {}
+func (e *CastExpr) exprMarker() {}
+func (e *CastExpr) String() string { return "(" + e.Expr.String() + " as " + e.TargetTy + ")" }
+
+// AsmExpr is an inline assembly block: asm("cli").
+type AsmExpr struct {
+	Pos        Position
+	Template   string   // the asm template string
+	Clobbers   []string // register clobbers, e.g. ["memory", "rax"]
+	SideEffect bool     // always true for volatile asm
+}
+
+func (e *AsmExpr) nodeMarker() {}
+func (e *AsmExpr) exprMarker() {}
+func (e *AsmExpr) String() string { return "asm(\"" + e.Template + "\")" }
 
 // BinaryOp is a binary operator expression: a + b, x * 2, etc.
 type BinaryOp struct {
